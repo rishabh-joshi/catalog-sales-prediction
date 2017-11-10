@@ -1,0 +1,50 @@
+---
+title: "MSIA 401 Project"
+author: "Jill Fan, Will Song, Lauren Gardner, Rush Joshi"
+date: "11/3/2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = F, warning = F}
+library(lubridate)
+```
+
+```{r}
+data <- read.csv("catalog sales data.csv", stringsAsFactors = F)
+
+data$target <- as.numeric(data$targdol > 0)
+data$datead6 <- as.Date(data$datead6, format = '%m/%d/%Y')
+data$datelp6 <- as.Date(data$datelp6, format = '%m/%d/%Y')
+
+train <- data[data$train == 1,]
+test <- data[data$train == 0,]
+```
+
+# Inconsistency in order history
+```{r}
+difford <- data$falord + data$sprord - data$ordhist
+data[difford < 0,]$ordhist <- data[difford < 0,]$falord + data[difford < 0,]$sprord
+# Check the last order date, if fall, update fall, else update string
+data[difford > 0,]$falord <- data[difford > 0,]$ordhist - data[difford > 0,]$sprord
+```
+
+# Inconsistency in datelp6 and lpuryear
+```{r}
+data$lpuryear <- year(data$datelp6)
+```
+
+# TODO:
+check last order date
+
+fall [Jul - Dec] spring [Jan - Jun]
+
+last purchase year <- parse data from date of last purchase within 6 months
+
+range of year added [1985 - 2012]
+
+range of last purchase [2003 - 2012]
+
