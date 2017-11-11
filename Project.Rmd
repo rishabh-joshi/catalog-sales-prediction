@@ -22,27 +22,76 @@ data$datelp6 <- as.Date(data$datelp6, format = '%m/%d/%Y')
 
 train <- data[data$train == 1,]
 test <- data[data$train == 0,]
+
 ```
 
-# Inconsistency in order history
+
+# Inconsistency in order history -- editted by Will
+## adding fall/spring categorical
+```{r}
+data$lpurmonth <- month(data$datelp6)
+data$season <- 'spring'
+data[data$lpurmonth>6,]$season <- 'fall'
+```
+
+## updating order history
 ```{r}
 difford <- data$falord + data$sprord - data$ordhist
-data[difford < 0,]$ordhist <- data[difford < 0,]$falord + data[difford < 0,]$sprord
+data[difford >0,]$ordhist <- data[difford > 0,]$falord + data[difford > 0,]$sprord
+
 # Check the last order date, if fall, update fall, else update string
-data[difford > 0,]$falord <- data[difford > 0,]$ordhist - data[difford > 0,]$sprord
+#data[difford < 0,]$falord <- data[difford > 0,]$ordhist - data[difford > 0,]$sprord
+
+for (i in 1:nrow(data)) {
+  if (difford[i] <0 && data$season[i] =='spring') {
+    data$sprord[i] <- data$ordhist[i]-data$falord[i]
+  }
+  else if  (difford[i] <0 && data$season[i] =='fall') {
+    data$falord[i] <- data$ordhist[i]-data$sprord[i]
+  }
+}
+
+# check whether all fields are updated now
+all(data$falor+data$sprord==data$ordhist)  # true
+
 ```
 
-# Inconsistency in datelp6 and lpuryear
+
+# Manage inconsistency in datelp6 and lpuryear -- editted by Will
+1. if lpuryear is NA ==> update it with the year parsed from 'datelp6'. The new variable is called 'datelp6_year'
+
+2. if lpuryear is not NA ==>
+  a. first convert them back to normal 4-digit years for our convenience
+  b. compare it with 'datelp6_year', and update one of them with the larger one
+  
 ```{r}
-data$lpuryear <- year(data$datelp6)
+nna_lpuryear <- data[!is.na(data$lpuryear),]
+table(nna_lpuryear$datelp6_year)
+# the above table shows that all non-NA lpuryears are in between 2003-2012
+
+data$datelp6_year <- year(data$datelp6)
+# first change back to 4-digit years for those non-NA years
+data[!is.na(data$lpuryear),]$lpuryear <- ifelse(data[!is.na(data$lpuryear),]$lpuryear<3,as.integer(paste0('201',as.character(data[!is.na(data$lpuryear),]$lpuryear))),as.integer(paste0('200',as.character(data[!is.na(data$lpuryear),]$lpuryear))))
+# then fill in the NA years
+data[is.na(data$lpuryear),]$lpuryear <- data[is.na(data$lpuryear),]$datelp6_year
+
+
+# This loop runs very slowly but provides the result we want. Feel free to change it to make it faster!
+for (i in 1:nrow(data)) {
+  if (data$lpuryear[i] < data$datelp6_year[i]) data$lpuryear[i] <- data$datelp6_year[i]
+  else data$datelp6_year[i] <- data$lpuryear[i]
+}
+
 ```
+
+
 
 # TODO:
-check last order date
+check last order date and update total order history, falord & sprord accordingly -- [done]
 
-fall [Jul - Dec] spring [Jan - Jun]
+fall [Jul - Dec] spring [Jan - Jun] -- [done]
 
-last purchase year <- parse data from date of last purchase within 6 months
+update 'lpuryear' and 'datelp6_year'(a newly created variable by parsing data from date of last purchase within 6 months) -- [done] 
 
 range of year added [1985 - 2012]
 
