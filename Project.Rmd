@@ -97,3 +97,15 @@ range of year added [1985 - 2012]
 
 range of last purchase [2003 - 2012]
 
+
+
+# before fri
+0. do correlations between x's
+1. fit model ==> try to find outliers and effect of interactions
+            ==> check VIF's
+
+
+
+
+
+
