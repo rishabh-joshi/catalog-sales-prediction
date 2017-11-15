@@ -84,6 +84,11 @@ for (i in 1:nrow(data)) {
 
 ```
 
+# Select Date within [1985, 2012] for year added and [2003, 2012] for last purchase
+```{r}
+data <- data[(year(data$datead6)>=1985) & (year(data$datead6)<=2012),]
+data <- data[(data$lpuryear>=2003) & (data$lpuryear<=2012),]
+```
 
 
 # TODO:
