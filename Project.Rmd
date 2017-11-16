@@ -34,6 +34,7 @@ data$season <- 'spring'
 data[data$lpurmonth>6,]$season <- 'fall'
 ```
 
+
 ## updating order history
 ```{r}
 difford <- data$falord + data$sprord - data$ordhist
@@ -74,14 +75,10 @@ data$datelp6_year <- year(data$datelp6)
 data[!is.na(data$lpuryear),]$lpuryear <- ifelse(data[!is.na(data$lpuryear),]$lpuryear<3,as.integer(paste0('201',as.character(data[!is.na(data$lpuryear),]$lpuryear))),as.integer(paste0('200',as.character(data[!is.na(data$lpuryear),]$lpuryear))))
 # then fill in the NA years
 data[is.na(data$lpuryear),]$lpuryear <- data[is.na(data$lpuryear),]$datelp6_year
-
-
-# This loop runs very slowly but provides the result we want. Feel free to change it to make it faster!
-for (i in 1:nrow(data)) {
-  if (data$lpuryear[i] < data$datelp6_year[i]) data$lpuryear[i] <- data$datelp6_year[i]
-  else data$datelp6_year[i] <- data$lpuryear[i]
-}
-
+# Update purchase year with greatest value
+data[data$lpuryear < data$datelp6,]$lpuryear <- data[data$lpuryear < data$datelp6,]$datelp6_year
+# Remove unneccessary datelp6_year column
+data <- data[1:20]
 ```
 
 # Select Date within [1985, 2012] for year added and [2003, 2012] for last purchase
@@ -90,6 +87,11 @@ data <- data[(year(data$datead6)>=1985) & (year(data$datead6)<=2012),]
 data <- data[(data$lpuryear>=2003) & (data$lpuryear<=2012),]
 ```
 
+## Add column for fall/spring year to get at specific season
+
+```{r}
+data$season_year <- paste(data$season, data$lpuryear, sep=" ")
+```
 
 # TODO:
 check last order date and update total order history, falord & sprord accordingly -- [done]
@@ -108,9 +110,3 @@ range of last purchase [2003 - 2012]
 0. do correlations between x's
 1. fit model ==> try to find outliers and effect of interactions
             ==> check VIF's
-
-
-
-
-
-
