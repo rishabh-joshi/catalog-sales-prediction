@@ -1,0 +1,342 @@
+---
+title: "Predictive Analytics Project"
+author: "Rush"
+output: 
+    html_document: 
+        keep_md: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(comment = "")
+knitr::opts_chunk$set(fig.align = 'center')
+```
+
+## Data Preprocessing
+
+Loading required libraries
+```{r, warning=FALSE, message=FALSE}
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(tidyr)
+library(reshape2)
+library(car)
+library(bestglm)
+library(caret)
+```
+
+Reading the data
+```{r}
+sales <- read.csv("catalog sales data.csv", stringsAsFactors = FALSE)
+sales <- mutate(sales, id = as.integer(row.names(sales)))
+head(sales)
+# str(sales)
+```
+
+Ceating a copy of the original data which will help with looking at the outliers later
+```{r}
+sale <- sales
+```
+
+
+Adding a variable `responded` which indicates whether the customer responded or not. `responded` = 1 if and only if `targdol>0` else it is 0.
+```{r}
+sales <- sales %>%
+    mutate(responded = as.integer(targdol>0)) %>%
+    mutate(responded = factor(responded))
+```
+
+Converting the date variables into correct format and plotting histograms.
+```{r}
+sales <- mutate(sales, datead6 = mdy(datead6), datelp6 = mdy(datelp6))
+```
+
+Adding the variable `lpurseason` which is 'fall' if the last date
+
+```{r}
+sales <- sales %>%
+    mutate(lpurseason = ifelse(month(datelp6)>6,'fall', 'spring')) %>%
+    mutate(lpurseason = factor(lpurseason)) 
+```
+
+The distribution of the sales data per year according to the date variables (in increasing order of percentage)
+
+```{r}
+sort(100 * table(year(sales$datead6))/nrow(sales))
+sort(100 * table(year(sales$datelp6))/nrow(sales))
+```
+
+The percentage of data before 1990 in very low.
+
+Converting both the date variabels to their corresponding integer values, which specifies the number of days since the date 1970-01-01. I am doing this to make the date a continuous variable.
+
+```{r}
+sales <- sales %>%
+    mutate(datead6 = as.integer(datead6)) %>%
+    mutate(datelp6 = as.integer(datelp6))
+```
+
+Removing last purchase year from the data because we have already accounted for the last purchase date in the `datelp6` variable.
+```{r}
+sales <- select(sales, -lpuryear)
+```
+
+Dividing the data into training and test set.
+```{r}
+train <- filter(sales, train==1)
+test <- filter(sales, train==0)
+```
+
+<!-- **This was in the whole data. Verify this again for only the training data.** -->
+<!-- Four observations have datead6 = 6/1/1931. The next nearest date is 1/1/1980. Therefore, these observations might be potential outliers. This is shown below.  -->
+
+<!-- ```{r} -->
+<!-- # the earliest date -->
+<!-- sale[which(train$datead6<0),] -->
+<!-- # there are only 4 dates before 1/1/1970 -->
+
+<!-- # the earliest date after 1/1/1970 -->
+<!-- sale[which(sales$datead6 == min(sales$datead6[sales$datead6>0])), ] -->
+<!-- ``` -->
+
+Checking to see if `falord + sprord` is correlated with `ordhist`.
+
+```{r}
+with(train, cor(falord+sprord, ordhist))
+```
+
+Therfore, they are highly correlated. We will keep only the `ordhist` variable in the model. We also update the `ordhist` variable using the following strategy:
+
+- If `ordhist >= falord + sprord`, do nothing.
+- Else `ordhist = falord + sprord`.
+
+We also apply the same transformations to the test data too.
+```{r}
+train <- train %>%
+    mutate(ordhist = ifelse(ordhist >= falord + sprord, ordhist, falord + sprord))
+
+test <- test %>%
+    mutate(ordhist = ifelse(ordhist >= falord + sprord, ordhist, falord + sprord))
+```
+
+If we check the correlation again
+```{r}
+with(train, cor(falord+sprord, ordhist))
+```
+
+The correlation increased. Therefore, we remove `falord` and `sprord` from the data.
+```{r}
+train <- select(train, -falord, -sprord)
+test <- select(test, -falord, -sprord)
+```
+
+Removing the `train` variable from the data
+```{r}
+train <- select(train, -train)
+test <- select(test, -train)
+```
+
+Checking for correlation between the predictors
+```{r}
+tr <- select(train, -responded, -lpurseason, -targdol)
+tr_cor <- as.matrix(cor(tr))
+tr_cor_melt <- arrange(melt(tr_cor), -abs(value))
+tr_cor_melt <- filter(tr_cor_melt, Var1 != Var2)
+tr_cor_melt <- tr_cor_melt[seq(from=1, to=nrow(tr_cor_melt), by=2),]
+thresh = 0.5 # displaying only correlations above threshold
+filter(tr_cor_melt, value>thresh)
+```
+
+We don't find any highly correlated variables. We think there might some correlation between the sum of the sales in the last few years with the total number of sales to date, i.e. `slstyr + slslyr + sls2ago + sls3ago` might be correlated with `slshist`.
+
+```{r}
+with(train, cor(slstyr + slslyr + sls2ago + sls3ago, slshist))
+```
+
+The correlation is greater than 0.7. Instead of removing these parameters from the model right away, we will keep these in and check for their VIFs after fitting the regression model. If the VIFs turn out to be high too, we will remove one of these two.
+
+For similar reasons, we check for correlation between `ordtyr + ordlyr + ord2ago + ord3ago` and `ordhist`. 
+
+```{r}
+with(train, cor(ordtyr + ordlyr + ord2ago + ord3ago, ordhist))
+```
+
+There doesn't seem to be a significant correlation here.
+
+## Plots
+
+```{r}
+
+train2 <- train %>%
+    filter(targdol>0) %>%
+    select(-responded)
+
+ggplot(data = train2, aes(x = datead6, y = targdol)) +
+    geom_point()
+
+ggplot(data = train2, aes(x = datelp6, y = targdol)) +
+    geom_point()
+
+ggplot(data = train2, aes(x = slstyr, y = targdol)) +
+    geom_point()
+
+ggplot(data = train2, aes(x = slslyr, y = targdol)) +
+    geom_point()
+
+ggplot(data = train2, aes(x = sls2ago, y = targdol)) +
+    geom_point()
+
+ggplot(data = train2, aes(x = sls3ago, y = targdol)) +
+    geom_point()
+
+ggplot(data = train2, aes(x = slshist, y = targdol)) +
+    geom_point()
+
+ggplot(data = train2, aes(x = ordtyr, y = targdol)) +
+    geom_point()
+
+ggplot(data = train2, aes(x = ordlyr, y = targdol)) +
+    geom_point()
+
+ggplot(data = train2, aes(x = ord2ago, y = targdol)) +
+    geom_point()
+
+ggplot(data = train2, aes(x = ord3ago, y = targdol)) +
+    geom_point()
+
+ggplot(data = train2, aes(x = ordhist, y = targdol)) +
+    geom_point()
+
+ggplot(data = train2, aes(x = lpurseason, y = targdol)) +
+    geom_point()
+
+ggplot(data = train2, aes(x = ordtyr, y = targdol)) +
+    geom_point()
+```
+
+
+## Logistic regression model
+
+```{r}
+train1 <- select(train, -targdol)
+logfit <- glm(responded ~ ., data = select(train1, -id), family = binomial)
+summary(logfit)
+```
+
+Checking the CCR on the train data
+```{r}
+pred <- fitted(logfit)
+
+acc <- 0
+thresh <- 0
+for (i in seq(0,1.01,0.01)){
+    tab <- table(train1$responded, pred>i)
+    CCR <- sum(diag(tab))/sum(tab)
+    if(CCR > acc){
+        acc <- CCR
+        thresh <- i
+        cat(paste(thresh, acc, " "), "\n")
+    }
+}
+
+thresh
+caret::confusionMatrix(train1$responded, as.integer(pred>thresh))
+```
+
+Checking the CCR on the test data
+```{r}
+pred_test <- predict(logfit, newdata = select(test, -targdol))
+caret::confusionMatrix(test$responded, as.integer(pred_test>thresh))
+```
+
+
+## Multiple Regression Model
+
+Fitting a multiple regression model on `targdol` as response but only where `targdol>0`. We also need to remove the `responded` variable from this training data because responded will always be 1 in this case since we are only considering `targdol>0`.
+
+```{r}
+train2 <- train %>%
+    filter(targdol>0) %>%
+    select(-responded)
+```
+
+Fitting the linear model
+```{r}
+lmfit <- lm(targdol ~ . , data = select(train2, -id))
+summary(lmfit)
+```
+
+The $R^2$ of the model is around 0.08, which is extremly poor.
+
+Variance inflation factors
+```{r}
+vif(lmfit)
+```
+
+The variance inflation factors do not indicate any multicollinearity among the predictors.
+
+## Checking for outliers
+
+### Influential Points
+```{r}
+h <- hatvalues(lmfit)
+n <- nrow(train2)
+p <- length(coef(lmfit)) - 1
+influential <- which(h>2*(p+1)/n)
+length(influential)
+```
+
+There are 343 influential points.
+
+### Cooks Distance
+
+```{r}
+cookdist <- cooks.distance(lmfit)
+cooks <- which(cookdist>4/(n-p-1))
+names(cooks) <- c()
+length(cooks)
+```
+
+There are 200 outliers according to cooks distance.
+
+Looking at these outliers in the original data
+```{r}
+sale[train2[cooks, ]$id, ]
+```
+
+Removing these outliers and fitting the linear model again
+```{r}
+lmfit2 <- lm(targdol ~ . , data = select(train2[-cooks, ], -id))
+summary(lmfit2)
+```
+
+The $R^2$ goes upto 0.1
+
+Removing the non significant variables.
+```{r}
+lmfit3 <- lm(targdol ~ . , data = select(train2[-cooks, ], -id, -datelp6, -sls3ago, -ordhist))
+summary(lmfit3)
+```
+
+Doesn't affect the $R^2$.
+
+Best subsets regression
+```{r}
+bestAIC <- bestglm(data.frame(select(train2, -id, -targdol), train2$targdol), IC="AIC")
+summary(bestAIC$BestModel)
+```
+
+The R squared is still bad.
+
+## Checking for interaction terms
+
+```{r}
+# tr2 <- model.matrix(~(datead6+datelp6+slstyr+slslyr+sls2ago+sls3ago+slshist+ordtyr+ordlyr+ord2ago+ord3ago+ordhist+lpurseason)^2, select(train2, -id, -targdol))
+
+# bestAIC <- bestglm(data.frame(tr2[,-1], train2$targdol), IC="AIC")
+# summary(bestAIC$BestModel)
+```
+
+
+Corrlelation
