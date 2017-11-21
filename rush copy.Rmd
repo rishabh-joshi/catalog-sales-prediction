@@ -152,15 +152,20 @@ log_fit_1 <- glm(responded ~ recency + datead6_int + datelp6_int + ordtyr + ordl
 summary(log_fit_1)
 ```
 ```{r}
-log1_pred <- predict(log_fit_1,train,type = 'response')  # find CCR 
-tab1 <- table(train$responded,log_fit_1$fitted.values>0.53)
-tab1
-# CCR1 roughly 0.905, no better
-caret::confusionMatrix(train$responded,as.integer(log_fit_1$fitted.values>0.53))
+log1_pred <- predict(log_fit_1,test,type = 'response')  # find CCR 
+optim.thresh(test$responded,log1_pred)
 ```
 
 ```{r}
-plot.roc(train$responded, log1_pred, print.auc = TRUE)
+tab1 <- table(test$responded,log1_pred>0.48)
+tab1
+# CCR1 roughly 0.905, no better
+caret::confusionMatrix(test$responded,as.integer(log1_pred>0.48))
+```
+
+
+```{r}
+plot.roc(test$responded, log1_pred, print.auc = TRUE)
 ```
 
 ```{r}
@@ -173,19 +178,19 @@ summary(log_fit_2)
 ```
 
 ```{r}
-log2_pred <- predict(log_fit_2,train,type = 'response')  # find CCR
-optim.thresh(train$responded, log2_pred)
+log2_pred <- predict(log_fit_2,test,type = 'response')  # find CCR
+optim.thresh(test$responded, log2_pred)
 ```
 
 ```{r}
-tab2 <- table(train$responded,log_fit_2$fitted.values>0.55)
+tab2 <- table(test$responded,log2_pred>0.44)
 tab2
 # CCR1 roughly 0.905, no better
-caret::confusionMatrix(train$responded,as.integer(log_fit_2$fitted.values>0.55))
+caret::confusionMatrix(test$responded,as.integer(log2_pred>0.44))
 ```
 
 ```{r}
-plot.roc(train$responded, log2_pred, print.auc = TRUE)
+plot.roc(test$responded, log2_pred, print.auc = TRUE)
 ```
 
 ```{r}
@@ -198,17 +203,22 @@ summary(log_fit_3)
 ```
 
 ```{r}
-log3_pred <- predict(log_fit_3,train,type = 'response')
-optim.thresh(train$responded, log3_pred)
+log3_pred <- predict(log_fit_3,test,type = 'response')
+optim.thresh(test$responded, log3_pred)
 ```
 
 ```{r}
-caret::confusionMatrix(train$responded,as.integer(log_fit_3$fitted.values>0.55))
+caret::confusionMatrix(test$responded,as.integer(log3_pred>0.51))
 ```
 
 
 ```{r}
-plot.roc(train$responded,log3_pred,print.auc=T)
+plot.roc(test$responded,log3_pred,print.auc=T)
+```
+
+```{r}
 vif(log_fit_3)
 ```
+
+
 
