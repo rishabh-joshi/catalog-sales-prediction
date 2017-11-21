@@ -282,7 +282,7 @@ hist(train2$ordlyr, breaks = 50)
 hist(train2$ord2ago, breaks = 50)
 hist(train2$ord3ago, breaks = 50)
 hist(train2$ordhist, breaks = 50)
-hist(train2$lpurseason)
+# hist(train2$lpurseason)
 ```
 
 Checking distributions after log transformation
