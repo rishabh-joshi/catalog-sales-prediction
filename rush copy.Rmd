@@ -79,7 +79,6 @@ for (i in 1:nrow(sales)) {
 
 # check whether all fields are updated now
 all(sales$falor+sales$sprord==sales$ordhist)  # true
-
 ```
 
 # Manage inconsistency in datelp6 and lpuryear -- editted by Will
@@ -173,7 +172,7 @@ vif(log_fit_1)
 ```
 
 ```{r}
-log_fit_2 <- glm(responded ~ recency + datead6_int + ordtyr + ordlyr + ord2ago + ord3ago + falord + sprord + ordtyr*ordlyr + ordlyr*ord2ago + ord2ago*ord3ago, family = binomial, data = train)
+log_fit_2 <- glm(responded ~ recency + datead6_int + ordtyr + ordlyr + ord2ago + ord3ago + falord + sprord + ordtyr*ordlyr + ordlyr*ord2ago, family = binomial, data = train)
 summary(log_fit_2)
 ```
 
@@ -183,10 +182,10 @@ optim.thresh(test$responded, log2_pred)
 ```
 
 ```{r}
-tab2 <- table(test$responded,log2_pred>0.44)
+tab2 <- table(test$responded,log2_pred>0.45)
 tab2
 # CCR1 roughly 0.905, no better
-caret::confusionMatrix(test$responded,as.integer(log2_pred>0.44))
+caret::confusionMatrix(test$responded,as.integer(log2_pred>0.45))
 ```
 
 ```{r}

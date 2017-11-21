@@ -1,0 +1,93 @@
+---
+title: "Data Cleaning"
+author: "Jill Fan, Lauren Gardiner, Rush Joshi, Will Song"
+date: "11/21/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Reading the Data
+
+```{r}
+sales <- read.csv("catalog sales data.csv", stringsAsFactors = FALSE)
+```
+
+# Converting Data to Correct Format
+Converting the date variables into correct format.
+```{r}
+sales$datead6 <- as.Date(sales$datead6, format = '%m/%d/%Y')
+sales$datelp6 <- as.Date(sales$datelp6, format = '%m/%d/%Y')
+```
+
+# Adding New Variables
+Adding a variable `responded` which indicates whether the customer responded or not. `responded` = 1 if and only if `targdol` > 0 else it is 0.
+```{r}
+sales <- sales %>%
+    mutate(responded = as.integer(targdol>0)) %>%
+    mutate(responded = factor(responded))
+```
+
+Adding the variable `lpurseason` which is 'fall' if the last day of purchase is in July or after.
+```{r}
+sales <- sales %>%
+    mutate(lpurseason = ifelse(month(sales$datelp6)>6, 'fall', 'spring')) %>%
+    mutate(lpurseason = factor(lpurseason)) 
+```
+
+Adding new integer values of the date variables `datead6` and `datelp6`.
+```{r}
+sales <- sales %>%
+    mutate(datead6_int = as.integer(datead6)) %>%
+    mutate(datelp6_int = as.integer(datelp6))
+```
+
+Adding recency with bin sizes of 6 months.
+```{r}
+sales$recency <- 2*(2017 - sales$lpuryear)
+sales[sales$lpurseason == "spring",]$recency <- 2*(2017 - sales[sales$lpurseason == "spring",]$lpuryear) + 1
+```
+
+# Managing Inconsistencies
+`datelp6` vs `lpuryear`
+Updating NA `lpuryear` with the year parsed from `datelp6`. Else first convert `datelp6` back to normal 4-digit years for our convenience and compare it with `datelp6_year`, and update one of them with the larger one.
+```{r}
+sales$datelp6_year <- year(sales$datelp6)
+sales[!is.na(sales$lpuryear),]$lpuryear <- ifelse(sales[!is.na(sales$lpuryear),]$lpuryear<3,as.integer(paste0('201',as.character(sales[!is.na(sales$lpuryear),]$lpuryear))),as.integer(paste0('200',as.character(sales[!is.na(sales$lpuryear),]$lpuryear))))
+sales[is.na(sales$lpuryear),]$lpuryear <- sales[is.na(sales$lpuryear),]$datelp6_year
+sales[sales$lpuryear < sales$datelp6,]$lpuryear <- sales[sales$lpuryear < sales$datelp6,]$datelp6_year
+sales <- sales[1:20]
+```
+
+`falord` + `sprord` vs `ordhist`
+If the sum of `falord` and `sprord` are greater than `ordhist`, update `ordhist`. Else, update either `falord` or `sprord` with respect to `lpurseason
+```{r}
+difford <- sales$falord + sales$sprord - sales$ordhist
+sales[difford >0,]$ordhist <- sales[difford > 0,]$falord + sales[difford > 0,]$sprord
+
+for (i in 1:nrow(sales)) {
+  if (difford[i] <0 && sales$lpurseason[i] =='spring') {
+    sales$sprord[i] <- sales$ordhist[i] - sales$falord[i]
+  }
+  else if  (difford[i] <0 && sales$lpurseason[i] =='fall') {
+    sales$falord[i] <- sales$ordhist[i] - sales$sprord[i]
+  }
+}
+```
+
+Selecting `datead6` within year of [1985, 2012] and `lpuryear` within [2003, 2012].
+```{r}
+sales <- sales[(year(sales$datead6)>=1985) & (year(sales$datead6)<=2012),]
+sales <- sales[(sales$lpuryear>=2003) & (sales$lpuryear<=2012),]
+```
+
+
+# Dividing the data into training and test set.
+```{r}
+train <- filter(sales, train == 1)
+test <- filter(sales, train == 0)
+```
+
+
