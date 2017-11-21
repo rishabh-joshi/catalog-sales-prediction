@@ -35,7 +35,7 @@ head(sales)
 # str(sales)
 ```
 
-Ceating a copy of the original data which will help with looking at the outliers later
+Creating a copy of the original data which will help with looking at the outliers later
 ```{r}
 sale <- sales
 ```
@@ -54,12 +54,12 @@ sales <- mutate(sales, datead6 = mdy(datead6), datelp6 = mdy(datelp6))
 ```
 
 Adding the variable `lpurseason` which is 'fall' if the last date
-
 ```{r}
 sales <- sales %>%
     mutate(lpurseason = ifelse(month(datelp6)>6,'fall', 'spring')) %>%
     mutate(lpurseason = factor(lpurseason)) 
 ```
+
 
 The distribution of the sales data per year according to the date variables (in increasing order of percentage)
 
@@ -72,6 +72,7 @@ The percentage of data before 1990 is very low.
 
 Converting both the date variabels to their corresponding integer values, which specifies the number of days since the date 1970-01-01. I am doing this to make the date a continuous variable.
 
+# rewrote the date variables?
 ```{r}
 sales <- sales %>%
     mutate(datead6 = as.integer(datead6)) %>%
@@ -85,8 +86,8 @@ sales <- select(sales, -lpuryear)
 
 Dividing the data into training and test set.
 ```{r}
-train <- filter(sales, train==1)
-test <- filter(sales, train==0)
+train <- filter(sales, train == 1)
+test <- filter(sales, train == 0)
 ```
 
 <!-- **This was in the whole data. Verify this again for only the training data.** -->
