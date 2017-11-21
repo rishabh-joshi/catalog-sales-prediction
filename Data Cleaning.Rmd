@@ -37,19 +37,6 @@ sales <- sales %>%
     mutate(lpurseason = factor(lpurseason)) 
 ```
 
-Adding new integer values of the date variables `datead6` and `datelp6`.
-```{r}
-sales <- sales %>%
-    mutate(datead6_int = as.integer(datead6)) %>%
-    mutate(datelp6_int = as.integer(datelp6))
-```
-
-Adding recency with bin sizes of 6 months.
-```{r}
-sales$recency <- 2*(2017 - sales$lpuryear)
-sales[sales$lpurseason == "spring",]$recency <- 2*(2017 - sales[sales$lpurseason == "spring",]$lpuryear) + 1
-```
-
 # Managing Inconsistencies
 `datelp6` vs `lpuryear`
 Updating NA `lpuryear` with the year parsed from `datelp6`. Else first convert `datelp6` back to normal 4-digit years for our convenience and compare it with `datelp6_year`, and update one of them with the larger one.
@@ -58,7 +45,7 @@ sales$datelp6_year <- year(sales$datelp6)
 sales[!is.na(sales$lpuryear),]$lpuryear <- ifelse(sales[!is.na(sales$lpuryear),]$lpuryear<3,as.integer(paste0('201',as.character(sales[!is.na(sales$lpuryear),]$lpuryear))),as.integer(paste0('200',as.character(sales[!is.na(sales$lpuryear),]$lpuryear))))
 sales[is.na(sales$lpuryear),]$lpuryear <- sales[is.na(sales$lpuryear),]$datelp6_year
 sales[sales$lpuryear < sales$datelp6,]$lpuryear <- sales[sales$lpuryear < sales$datelp6,]$datelp6_year
-sales <- sales[1:20]
+sales <- sales[1:19]
 ```
 
 `falord` + `sprord` vs `ordhist`
@@ -83,6 +70,39 @@ sales <- sales[(year(sales$datead6)>=1985) & (year(sales$datead6)<=2012),]
 sales <- sales[(sales$lpuryear>=2003) & (sales$lpuryear<=2012),]
 ```
 
+# Adding Additional Variables
+Adding recency with bin sizes of 6 months.
+```{r}
+sales$recency_bin <- 2*(2017 - sales$lpuryear)
+sales[sales$lpurseason == "spring",]$recency_bin <- 2*(2017 - sales[sales$lpurseason == "spring",]$lpuryear) + 1
+```
+
+Adding customer lifetime and rececy by calculating days from date
+```{r}
+sales$recency <- as.integer(today() -ymd(sales$datelp6))
+sales$lifetime <- as.integer(today() -ymd(sales$datead6))
+```
+
+Adding active percentage based on lifetime and recency
+```{r}
+sales$active <- (sales$lifetime - sales$recency) / sales$lifetime
+```
+
+Calculating average spend per order
+```{r}
+sales$avg_amount <- sales$slshist / sales$ordhist
+```
+
+Creating boolean for large purchase amount
+```{r} 
+sales$large_avg <- 0
+sales[sales$avg_amount > mean(sales$avg_amount), ]$large_avg <- 1
+```
+
+Adding variable for season year
+```{r}
+sales$lpurseason_year <- paste(sales$lpurseason, sales$lpuryear, sep=" ")
+```
 
 # Dividing the data into training and test set.
 ```{r}
@@ -90,4 +110,10 @@ train <- filter(sales, train == 1)
 test <- filter(sales, train == 0)
 ```
 
+# Write out clean data
+
+```{r}
+write.csv(train, file = "clean_train.csv", row.names=FALSE)
+write.csv(test, file = "clean_test.csv", row.names=FALSE)
+```
 
