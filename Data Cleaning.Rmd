@@ -9,94 +9,114 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Reading the Data
+# Loading required libraries
+
+```{r}
+library(dplyr)
+library(lubridate)
+```
+
+
+
+# Data cleaning
 
 ```{r}
 sales <- read.csv("catalog sales data.csv", stringsAsFactors = FALSE)
 ```
 
-# Converting Data to Correct Format
-Converting the date variables into correct format.
+## Adding an ID column to identify each customer uniquely
+
 ```{r}
-sales$datead6 <- as.Date(sales$datead6, format = '%m/%d/%Y')
-sales$datelp6 <- as.Date(sales$datelp6, format = '%m/%d/%Y')
+sales <- mutate(sales, id = as.integer(row.names(sales)))
 ```
 
-# Adding New Variables
-Adding a variable `responded` which indicates whether the customer responded or not. `responded` = 1 if and only if `targdol` > 0 else it is 0.
+## Converting the date variables into correct format
+
+```{r}
+sales <- mutate(sales, datead6 = mdy(datead6), datelp6 = mdy(datelp6))
+```
+
+## Adding some features
+
+A variable `responded` which indicates whether the customer responded or not. `responded` = 1 if and only if `targdol` > 0 else it is 0.
+
 ```{r}
 sales <- sales %>%
     mutate(responded = as.integer(targdol>0)) %>%
     mutate(responded = factor(responded))
 ```
 
-Adding the variable `lpurseason` which is 'fall' if the last day of purchase is in July or after.
+A variable `lpurseason` which is 'fall' if the last day of purchase is after June and 'spring' otherwise.
+
 ```{r}
 sales <- sales %>%
     mutate(lpurseason = ifelse(month(sales$datelp6)>6, 'fall', 'spring')) %>%
     mutate(lpurseason = factor(lpurseason)) 
 ```
 
-# Managing Inconsistencies
-`datelp6` vs `lpuryear`
-Updating NA `lpuryear` with the year parsed from `datelp6`. Else first convert `datelp6` back to normal 4-digit years for our convenience and compare it with `datelp6_year`, and update one of them with the larger one.
+## Managing inconsistencies 
+
+### Between `datelp6` and `lpuryear`
+
+Updating NA values of `lpuryear` with the year parsed from `datelp6`. For the non NA values, first convert `datelp6` back to normal 4-digit years for our convenience and compare it with `datelp6_year`, and update one of them with the larger one.
+
 ```{r}
 sales$datelp6_year <- year(sales$datelp6)
 sales[!is.na(sales$lpuryear),]$lpuryear <- ifelse(sales[!is.na(sales$lpuryear),]$lpuryear<3,as.integer(paste0('201',as.character(sales[!is.na(sales$lpuryear),]$lpuryear))),as.integer(paste0('200',as.character(sales[!is.na(sales$lpuryear),]$lpuryear))))
 sales[is.na(sales$lpuryear),]$lpuryear <- sales[is.na(sales$lpuryear),]$datelp6_year
 sales[sales$lpuryear < sales$datelp6,]$lpuryear <- sales[sales$lpuryear < sales$datelp6,]$datelp6_year
-sales <- sales[1:19]
+sales <- select(sales, -datelp6_year)
 ```
 
-`falord` + `sprord` vs `ordhist`
-If the sum of `falord` and `sprord` are greater than `ordhist`, update `ordhist`. Else, update either `falord` or `sprord` with respect to `lpurseason
+### Between `falord`, `sprord` and `ordhist`
+If the sum of `falord` and `sprord` are greater than `ordhist`, update `ordhist`. Else, update either `falord` or `sprord` with respect to `lpurseason`
 ```{r}
-difford <- sales$falord + sales$sprord - sales$ordhist
-sales[difford >0,]$ordhist <- sales[difford > 0,]$falord + sales[difford > 0,]$sprord
-
-for (i in 1:nrow(sales)) {
-  if (difford[i] <0 && sales$lpurseason[i] =='spring') {
-    sales$sprord[i] <- sales$ordhist[i] - sales$falord[i]
-  }
-  else if  (difford[i] <0 && sales$lpurseason[i] =='fall') {
-    sales$falord[i] <- sales$ordhist[i] - sales$sprord[i]
-  }
-}
+sales <- sales %>%
+    mutate(ordhist = ifelse(ordhist<falord+sprord, falord+sprord, ordhist)) %>%
+    mutate(sprord = ifelse(ordhist>falord+sprord & lpurseason == 'spring', 
+                           ordhist-falord, sprord)) %>%
+    mutate(falord = ifelse(ordhist>falord+sprord & lpurseason == 'fall', 
+                           ordhist-sprord, falord))
 ```
+
+
+**We cannot remove the columns from sales that lie outside this range because we will be removing data from the test set as well. We should only perform this action on the training data.**
 
 Selecting `datead6` within year of [1985, 2012] and `lpuryear` within [2003, 2012].
 ```{r}
-sales <- sales[(year(sales$datead6)>=1985) & (year(sales$datead6)<=2012),]
-sales <- sales[(sales$lpuryear>=2003) & (sales$lpuryear<=2012),]
+# sales <- sales[(year(sales$datead6)>=1985) & (year(sales$datead6)<=2012),]
+# sales <- sales[(sales$lpuryear>=2003) & (sales$lpuryear<=2012),]
 ```
 
-# Adding Additional Variables
+## Adding Additional Variables
+
 Adding recency with bin sizes of 6 months.
 ```{r}
 sales$recency_bin <- 2*(2017 - sales$lpuryear)
 sales[sales$lpurseason == "spring",]$recency_bin <- 2*(2017 - sales[sales$lpurseason == "spring",]$lpuryear) + 1
 ```
 
-Adding customer lifetime and rececy by calculating days from date
+Adding customer lifetime and recency by calculating days from date
 ```{r}
-sales$recency <- as.integer(today() -ymd(sales$datelp6))
-sales$lifetime <- as.integer(today() -ymd(sales$datead6))
+sales <- sales %>% 
+    mutate(recency = as.integer(today() - datelp6)) %>%
+    mutate(lifetime = as.integer(today() - datead6))
 ```
 
 Adding active percentage based on lifetime and recency
 ```{r}
-sales$active <- (sales$lifetime - sales$recency) / sales$lifetime
+sales <- mutate(sales, active = (lifetime - recency)/lifetime)
 ```
 
-Calculating average spend per order
+Calculating average spend per order. If both slshist and ordhist are 0, NAs will be produced. We will replace those NAs by 0.
 ```{r}
-sales$avg_amount <- sales$slshist / sales$ordhist
+sales <- mutate(sales, avg_amount = slshist/ordhist) %>%
+    mutate(avg_amount = ifelse(is.na(avg_amount), 0, avg_amount))
 ```
 
-Creating boolean for large purchase amount
-```{r} 
-sales$large_avg <- 0
-sales[sales$avg_amount > mean(sales$avg_amount), ]$large_avg <- 1
+Creating a Boolean for large purchase amount
+```{r}
+sales <- mutate(sales, large_avg = ifelse(avg_amount>mean(avg_amount), 1, 0))
 ```
 
 Adding variable for season year
