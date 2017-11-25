@@ -473,6 +473,17 @@ F_meas(factor(as.integer(pred_test>thresh)),
 
 **F1 score on the test data = 0.4444**
 
+### Writing the predicted probabilites in a file
+
+```{r}
+# prob_test <- data.frame(id = test_logistic$id, prob = round(pred_test, 3), responded = test_logistic$responded)
+# prob_test <- arrange(prob_test, desc(prob))
+
+prob_test <- data.frame(id = test_logistic$id, prob = pred_test)
+write.csv(prob_test, "prob.csv", row.names=FALSE)
+```
+
+
 
 ## Multiple Regression Model
 
