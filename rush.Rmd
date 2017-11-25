@@ -25,123 +25,52 @@ library(car)
 library(bestglm)
 library(caret)
 library(glmnet)
+library(pROC)
+library(SDMTools)
 ```
 
 Reading the data
 ```{r}
-sales <- read.csv("catalog sales data.csv", stringsAsFactors = FALSE)
-sales <- mutate(sales, id = as.integer(row.names(sales)))
-head(sales)
-# str(sales)
+train <- read.csv("clean_train.csv", stringsAsFactors = FALSE)
+test <- read.csv("clean_test.csv", stringsAsFactors = FALSE)
 ```
 
-Creating a copy of the original data which will help with looking at the outliers later
-```{r}
-sale <- sales
-```
-
-
-Adding a variable `responded` which indicates whether the customer responded or not. `responded` = 1 if and only if `targdol>0` else it is 0.
-```{r}
-sales <- sales %>%
-    mutate(responded = as.integer(targdol>0)) %>%
-    mutate(responded = factor(responded))
-```
-
-Converting the date variables into correct format and plotting histograms.
-```{r}
-sales <- mutate(sales, datead6 = mdy(datead6), datelp6 = mdy(datelp6))
-```
-
-Adding the variable `lpurseason` which is 'fall' if the last date
-```{r}
-sales <- sales %>%
-    mutate(lpurseason = ifelse(month(datelp6)>6,'fall', 'spring')) %>%
-    mutate(lpurseason = factor(lpurseason)) 
-```
-
-
-The distribution of the sales data per year according to the date variables (in increasing order of percentage)
-
-```{r}
-sort(100 * table(year(sales$datead6))/nrow(sales))
-sort(100 * table(year(sales$datelp6))/nrow(sales))
-```
-
-The percentage of data before 1990 is very low.
 
 Converting both the date variabels to their corresponding integer values, which specifies the number of days since the date 1970-01-01. I am doing this to make the date a continuous variable.
 
-# rewrote the date variables?
-```{r}
-sales <- sales %>%
-    mutate(datead6 = as.integer(datead6)) %>%
-    mutate(datelp6 = as.integer(datelp6))
-```
-
-Removing last purchase year from the data because we have already accounted for the last purchase date in the `datelp6` variable.
-```{r}
-sales <- select(sales, -lpuryear)
-```
-
-Dividing the data into training and test set.
-```{r}
-train <- filter(sales, train == 1)
-test <- filter(sales, train == 0)
-```
-
-<!-- **This was in the whole data. Verify this again for only the training data.** -->
-<!-- Four observations have datead6 = 6/1/1931. The next nearest date is 1/1/1980. Therefore, these observations might be potential outliers. This is shown below.  -->
-
-<!-- ```{r} -->
-<!-- # the earliest date -->
-<!-- sale[which(train$datead6<0),] -->
-<!-- # there are only 4 dates before 1/1/1970 -->
-
-<!-- # the earliest date after 1/1/1970 -->
-<!-- sale[which(sales$datead6 == min(sales$datead6[sales$datead6>0])), ] -->
-<!-- ``` -->
-
-Checking to see if `falord + sprord` is correlated with `ordhist`.
-
-```{r}
-with(train, cor(falord+sprord, ordhist))
-```
-
-They are highly correlated. We will keep only the `ordhist` variable in the model. We also update the `ordhist` variable using the following strategy:
-
-- If `ordhist >= falord + sprord`, do nothing.
-- Else `ordhist = falord + sprord`.
-
-We also apply the same transformations to the test data too.
 ```{r}
 train <- train %>%
-    mutate(ordhist = ifelse(ordhist >= falord + sprord, ordhist, falord + sprord))
+    mutate(datead6 = as.integer(ymd(datead6))) %>%
+    mutate(datelp6 = as.integer(ymd(datelp6))) %>%
+    mutate(large_avg = factor(large_avg), pur3yr = factor(pur3yr)) %>%
+    mutate(lpurseason = factor(lpurseason), slscmp = factor(slscmp))
 
 test <- test %>%
-    mutate(ordhist = ifelse(ordhist >= falord + sprord, ordhist, falord + sprord))
+    mutate(datead6 = as.integer(ymd(datead6))) %>%
+    mutate(datelp6 = as.integer(ymd(datelp6))) %>%
+    mutate(large_avg = factor(large_avg), pur3yr = factor(pur3yr)) %>%
+    mutate(lpurseason = factor(lpurseason), slscmp = factor(slscmp))
 ```
 
-If we check the correlation again
+Removing last purchase year from the data because we have already accounted for the last purchase date in the `datelp6` variable. We also need to remove the `responded` variable from this training data because responded will always be 1 in this case since we are only considering `targdol>0`.
+
 ```{r}
-with(train, cor(falord+sprord, ordhist))
+train_logistic <- select(train, -train, -targdol, -lpuryear, -lpurseason_year)
+test_logistic <- select(test, -train, -targdol, -lpuryear, -lpurseason_year)
+
+train <- train %>%
+    filter(responded==1) %>%
+    select(-train, -lpuryear, -responded, -lpurseason_year)
+
+test <- test %>%
+    filter(responded==1) %>%
+    select(-train, -lpuryear, -responded, -lpurseason_year)
 ```
 
-The correlation increased. Therefore, we remove `falord` and `sprord` from the data.
-```{r}
-train <- select(train, -falord, -sprord)
-test <- select(test, -falord, -sprord)
-```
-
-Removing the `train` variable from the data
-```{r}
-train <- select(train, -train)
-test <- select(test, -train)
-```
 
 Checking for correlation between the predictors
 ```{r}
-tr <- select(train, -responded, -lpurseason, -targdol)
+tr <- select(train, -targdol, -lpurseason, -large_avg, -pur3yr, -slscmp)
 tr_cor <- as.matrix(cor(tr))
 tr_cor_melt <- arrange(melt(tr_cor), -abs(value))
 tr_cor_melt <- filter(tr_cor_melt, Var1 != Var2)
@@ -150,90 +79,134 @@ thresh = 0.5 # displaying only correlations above threshold
 filter(tr_cor_melt, value>thresh)
 ```
 
-We don't find any highly correlated variables. We think there might some correlation between the sum of the sales in the last few years with the total number of sales to date, i.e. `slstyr + slslyr + sls2ago + sls3ago` might be correlated with `slshist`.
-
-```{r}
-with(train, cor(slstyr + slslyr + sls2ago + sls3ago, slshist))
-```
-
-The correlation is greater than 0.7. Instead of removing these parameters from the model right away, we will keep these in and check for their VIFs after fitting the regression model. If the VIFs turn out to be high too, we will remove one of these two.
-
-For similar reasons, we check for correlation between `ordtyr + ordlyr + ord2ago + ord3ago` and `ordhist`. 
-
-```{r}
-with(train, cor(ordtyr + ordlyr + ord2ago + ord3ago, ordhist))
-```
-
-There doesn't seem to be a significant correlation here.
 
 ## Plots
 
 ```{r}
-
-train2 <- train %>%
-    filter(targdol>0) %>%
-    select(-responded)
-
-ggplot(data = train2, aes(x = datead6, y = targdol)) +
+ggplot(data = train, aes(x = datead6, y = targdol)) +
     geom_point()
 
-ggplot(data = train2, aes(x = datelp6, y = targdol)) +
+ggplot(data = train, aes(x = datelp6, y = targdol)) +
     geom_point()
 
-ggplot(data = train2, aes(x = slstyr, y = targdol)) +
+ggplot(data = train, aes(x = slstyr, y = targdol)) +
     geom_point()
 
-ggplot(data = train2, aes(x = slslyr, y = targdol)) +
+ggplot(data = train, aes(x = slslyr, y = targdol)) +
     geom_point()
 
-ggplot(data = train2, aes(x = sls2ago, y = targdol)) +
+ggplot(data = train, aes(x = sls2ago, y = targdol)) +
     geom_point()
 
-ggplot(data = train2, aes(x = sls3ago, y = targdol)) +
+ggplot(data = train, aes(x = sls3ago, y = targdol)) +
     geom_point()
 
-ggplot(data = train2, aes(x = log(slshist+1), y = targdol)) +
+ggplot(data = train, aes(x = log(slshist+1), y = targdol)) +
     geom_point()
 
-ggplot(data = train2, aes(x = log(ordtyr+1), y = targdol)) +
+ggplot(data = train, aes(x = log(ordtyr+1), y = targdol)) +
     geom_point()
 
-ggplot(data = train2, aes(x = ordlyr, y = targdol)) +
+ggplot(data = train, aes(x = ordlyr, y = targdol)) +
     geom_point()
 
-ggplot(data = train2, aes(x = ord2ago, y = targdol)) +
+ggplot(data = train, aes(x = ord2ago, y = targdol)) +
     geom_point()
 
-ggplot(data = train2, aes(x = ord3ago, y = targdol)) +
+ggplot(data = train, aes(x = ord3ago, y = targdol)) +
     geom_point()
 
-ggplot(data = train2, aes(x = ordhist, y = targdol)) +
+ggplot(data = train, aes(x = ordhist, y = targdol)) +
     geom_point()
 
-ggplot(data = train2, aes(x = lpurseason, y = targdol)) +
+ggplot(data = train, aes(x = lpurseason, y = targdol)) +
     geom_point()
 
-ggplot(data = train2, aes(x = ordtyr, y = targdol)) +
+ggplot(data = train, aes(x = ordtyr, y = targdol)) +
     geom_point()
 ```
 
-
-## Logistic regression model
-
+Checking univariate distributions of the variables
 ```{r}
-train1 <- select(train, -targdol)
-logfit <- glm(responded ~ ., data = select(train1, -id), family = binomial)
-summary(logfit)
+qplot(x = targdol, data = train, geom = "histogram")
+qplot(x = datead6, data = train, geom = "histogram")
+qplot(x = datelp6, data = train, geom = "histogram")
+qplot(x = slstyr, data = train, geom = "histogram")
+qplot(x = slslyr, data = train, geom = "histogram")
+qplot(x = sls2ago, data = train, geom = "histogram")
+qplot(x = sls3ago, data = train, geom = "histogram")
+qplot(x = slshist, data = train, geom = "histogram")
+qplot(x = ordtyr, data = train, geom = "histogram")
+qplot(x = ordlyr, data = train, geom = "histogram")
+qplot(x = ord2ago, data = train, geom = "histogram")
+qplot(x = ord3ago, data = train, geom = "histogram")
+qplot(x = ordhist, data = train, geom = "histogram")
+
+qplot(x = falord, data = train, geom = "histogram")
+qplot(x = sprord, data = train, geom = "histogram")
+qplot(x = recency_bin, data = train, geom = "histogram")
+qplot(x = recency, data = train, geom = "histogram")
+qplot(x = lifetime, data = train, geom = "histogram")
+qplot(x = active, data = train, geom = "histogram")
+qplot(x = avg_amount, data = train, geom = "histogram")
+# qplot(x = large_avg, data = train, geom = "histogram")
+# qplot(x = lpurseason, data = train, geom = "histogram")
 ```
 
-Checking the CCR on the train data
-```{r}
-pred <- fitted(logfit)
+Checking distributions after log transformation. Adding a small displacement to avoid taking log of zeros.
 
+A small constant to add before taking log
+```{r}
+K = 0.0001
+```
+
+
+```{r}
+qplot(x = log(targdol + K), data = train, geom = "histogram")
+qplot(x = log(datead6 + K), data = train, geom = "histogram")
+qplot(x = log(datelp6 + K), data = train, geom = "histogram")
+qplot(x = log(slstyr + K), data = train, geom = "histogram")
+qplot(x = log(slslyr + K), data = train, geom = "histogram")
+qplot(x = log(sls2ago + K), data = train, geom = "histogram")
+qplot(x = log(sls3ago + K), data = train, geom = "histogram")
+qplot(x = log(slshist + K), data = train, geom = "histogram")
+qplot(x = log(ordtyr + K), data = train, geom = "histogram")
+qplot(x = log(ordlyr + K), data = train, geom = "histogram")
+qplot(x = log(ord2ago + K), data = train, geom = "histogram")
+qplot(x = log(ord3ago + K), data = train, geom = "histogram")
+qplot(x = log(ordhist + K), data = train, geom = "histogram")
+
+qplot(x = log(falord + K), data = train, geom = "histogram")
+qplot(x = log(sprord + K), data = train, geom = "histogram")
+qplot(x = log(recency_bin + K), data = train, geom = "histogram")
+# qplot(x = log(recency + K), data = train, geom = "histogram")
+# qplot(x = log(lifetime + K), data = train, geom = "histogram")
+# qplot(x = log(active + K), data = train, geom = "histogram")
+qplot(x = log(avg_amount + K), data = train, geom = "histogram")
+# qplot(x = log(large_avg + K), data = train, geom = "histogram")
+```
+
+## Logistic regression models
+
+### Fitting a basic logistic regression model
+
+The variables not included in this model are becuase they were introducing multicollinearity and hence resulting in NA values while fitting the model.
+```{r}
+logistic1 <- glm(responded ~ . - ordhist - slshist - recency_bin - datelp6 - datead6 - ord4bfr, data = select(train_logistic, -id), 
+              family = binomial)
+summary(logistic1)
+```
+
+Checking the CCR on the test data
+```{r}
+pred <- fitted(logistic1)
+
+pred_test <- predict(logistic1, newdata = select(test_logistic, -id), 
+                     type = 'response')
 acc <- 0
 thresh <- 0
 for (i in seq(0,1,0.01)){
-    tab <- table(train1$responded, pred>i)
+    tab <- table(test_logistic$responded, pred_test>i)
     CCR <- sum(diag(tab))/sum(tab)
     if(CCR > acc){
         acc <- CCR
@@ -243,191 +216,415 @@ for (i in seq(0,1,0.01)){
 }
 
 thresh
-caret::confusionMatrix(train1$responded, as.integer(pred>thresh))
+caret::confusionMatrix(train_logistic$responded, as.integer(pred>thresh))
 ```
 
 Checking the CCR on the test data
 ```{r}
-pred_test <- predict(logfit, newdata = select(test, -targdol))
-caret::confusionMatrix(test$responded, as.integer(pred_test>thresh))
+caret::confusionMatrix(test_logistic$responded, as.integer(pred_test>thresh))
 ```
+
+**CCR in the test data = 0.9152**
+
+Checking the F1 score of this logistic model
+```{r}
+F_meas(factor(as.integer(pred_test>thresh)), 
+       reference = as.factor(test_logistic$responded), relevant = "1")
+```
+
+**F1 score = 0.314**
+
+### Fitting a logistic model with log of the predictors
+
+```{r}
+logistic2 <- glm(responded ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
+                I(log(sls2ago + K)) + I(log(sls3ago + K)) + I(log(sls4bfr + K)) +
+                I(log(ordtyr + K)) + I(log(ordlyr + K)) +
+                I(log(ord2ago + K)) + I(log(ord3ago + K)) + I(log(ord4bfr + K)) +
+                I(log(sprord+K)) + I(log(falord+K)) +
+                I(log(avg_amount + K)) + large_avg + active + lifetime + 
+                recency + lpurseason, data = select(train_logistic, -id), 
+        family = binomial)
+summary(logistic2)
+```
+
+Checking the CCR on the test data
+```{r}
+pred <- fitted(logistic2)
+
+pred_test <- predict(logistic2, newdata = select(test_logistic, -id), 
+                     type = 'response')
+acc <- 0
+thresh <- 0
+for (i in seq(0,1,0.01)){
+    tab <- table(test_logistic$responded, pred_test>i)
+    CCR <- sum(diag(tab))/sum(tab)
+    if(CCR > acc){
+        acc <- CCR
+        thresh <- i
+        cat(paste(thresh, acc, " "), "\n")
+    }
+}
+
+thresh
+caret::confusionMatrix(train_logistic$responded, as.integer(pred>thresh))
+```
+
+Checking the CCR on the test data
+```{r}
+caret::confusionMatrix(test_logistic$responded, as.integer(pred_test>thresh))
+```
+
+**CCR on the test data = 0.9242**
+
+Checking the F1 score of this logistic model
+```{r}
+F_meas(factor(as.integer(pred_test>thresh)), 
+       reference = as.factor(test_logistic$responded), relevant = "1")
+```
+
+**F1 score on the test data = 0.39**
+
+Significant improvement from the previous model. We definitely should regress on the log of predictors.
+
+### Adding interactions between sales
+
+We add some interactions between sales of last 1, 2 and 3 years to capture consistency. I added these interactions one by one to see if they increase the CCR and the F1 Score on the test set. We kept all the interactions that resulted in an increase in the CCR and F1 Score. Adding similar kinds of interactions between the orders of last 1,2 or 3 years did not increase the F1 score or the CCR. Therefore, we did not add them.
+
+```{r}
+logistic3 <- glm(responded ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
+                I(log(sls2ago + K)) + I(log(sls3ago + K)) + I(log(sls4bfr + K)) +
+                I(log(ordtyr + K)) + I(log(ordlyr + K)) +
+                I(log(ord2ago + K)) + I(log(ord3ago + K)) + I(log(ord4bfr + K)) +
+                I(log(sprord+K)) + I(log(falord+K)) +
+                I(log(avg_amount + K)) + large_avg + active + lifetime + 
+                recency + lpurseason + 
+                I(log(slstyr + K)):I(log(slslyr + K)) +
+                I(log(slslyr + K)):I(log(sls2ago + K)) + 
+                I(log(sls2ago + K)):I(log(sls3ago + K)) +
+                I(log(sls3ago + K)):I(log(sls4bfr + K)), 
+                data = select(train_logistic, -id), 
+        family = binomial)
+summary(logistic3)
+```
+
+Checking the CCR on the test data
+```{r}
+pred <- fitted(logistic3)
+pred_test <- predict(logistic3, newdata = select(test_logistic, -id), 
+                     type = 'response')
+acc <- 0
+thresh <- 0
+for (i in seq(0,1,0.01)){
+    tab <- table(test_logistic$responded, pred_test>i)
+    CCR <- sum(diag(tab))/sum(tab)
+    if(CCR > acc){
+        acc <- CCR
+        thresh <- i
+        cat(paste(thresh, acc, " "), "\n")
+    }
+}
+
+thresh
+caret::confusionMatrix(train_logistic$responded, as.integer(pred>thresh))
+```
+
+Checking the CCR on the test data
+```{r}
+caret::confusionMatrix(test_logistic$responded, as.integer(pred_test>thresh))
+```
+
+**CCR on the test data = 0.9276**
+
+Checking the F1 score of this logistic model
+```{r}
+F_meas(factor(as.integer(pred_test>thresh)), 
+       reference = as.factor(test_logistic$responded), relevant = "1")
+```
+
+**F1 score on the test data = 0.4479**
+
+Significant improvement from the previous model. Therefore we should keep these interactions in the losgistic model.
+
+### Adding some more interactions
+
+```{r}
+logistic4 <- glm(responded ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
+                I(log(sls2ago + K)) + I(log(sls3ago + K)) + I(log(sls4bfr + K)) +
+                I(log(ordtyr + K)) + I(log(ordlyr + K)) +
+                I(log(ord2ago + K)) + I(log(ord3ago + K)) + I(log(ord4bfr + K)) +
+                I(log(sprord+K)) + I(log(falord+K)) +
+                I(log(avg_amount + K)) + large_avg + active + lifetime + 
+                recency + lpurseason + 
+                I(log(slstyr + K)):I(log(slslyr + K)) +
+                I(log(slslyr + K)):I(log(sls2ago + K)) + 
+                I(log(sls2ago + K)):I(log(sls3ago + K)) +
+                I(log(sls3ago + K)):I(log(sls4bfr + K)) +
+            
+                recency:active + lifetime:slscmp + 
+                I(log(slstyr + K)):I(log(ordtyr+ K)) + 
+                I(log(slstyr + K)):recency, 
+                data = select(train_logistic, -id), 
+        family = binomial)
+summary(logistic4)
+```
+
+Checking the CCR on the train data
+```{r}
+pred <- fitted(logistic4)
+pred_test <- predict(logistic4, newdata = select(test_logistic, -id), 
+                     type = 'response')
+acc <- 0
+thresh <- 0
+for (i in seq(0,1,0.01)){
+    tab <- table(test_logistic$responded, pred_test>i)
+    CCR <- sum(diag(tab))/sum(tab)
+    if(CCR > acc){
+        acc <- CCR
+        thresh <- i
+        cat(paste(thresh, acc, " "), "\n")
+    }
+}
+
+thresh
+caret::confusionMatrix(train_logistic$responded, as.integer(pred>thresh))
+```
+
+Checking the CCR on the test data
+```{r}
+caret::confusionMatrix(test_logistic$responded, as.integer(pred_test>thresh))
+```
+
+**CCR on the test data = 0.9283**
+
+Checking the F1 score of this logistic model
+```{r}
+F_meas(factor(as.integer(pred_test>thresh)), 
+       reference = as.factor(test_logistic$responded), relevant = "1")
+```
+
+**F1 score on the test data = 0.4613**
+
+Significant improvement from the previous model. Therefore we should keep these interactions in the losgistic model.
+
+
+### Adding some more interactions
+
+Adding these interactions increased the CCR but resulted in a decrease in the F1 score.
+
+```{r}
+logistic5 <- glm(responded ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
+                I(log(sls2ago + K)) + I(log(sls3ago + K)) + I(log(sls4bfr + K)) +
+                I(log(ordtyr + K)) + I(log(ordlyr + K)) +
+                I(log(ord2ago + K)) + I(log(ord3ago + K)) + I(log(ord4bfr + K)) +
+                I(log(sprord+K)) + I(log(falord+K)) +
+                I(log(avg_amount + K)) + large_avg + active + lifetime + 
+                recency + lpurseason + 
+                I(log(slstyr + K)):I(log(slslyr + K)) +
+                I(log(slslyr + K)):I(log(sls2ago + K)) + 
+                I(log(sls2ago + K)):I(log(sls3ago + K)) +
+                I(log(sls3ago + K)):I(log(sls4bfr + K)) +
+            
+                recency:active + lifetime:slscmp + 
+                I(log(slstyr + K)):I(log(ordtyr+ K)) + 
+                I(log(slstyr + K)):recency + 
+                    
+                    I(log(slslyr + K)):recency +
+                    I(log(sls2ago + K)):I(log(ord2ago + K)) + 
+                    I(log(avg_amount + K)):recency, 
+                data = select(train_logistic, -id), 
+        family = binomial)
+summary(logistic5)
+```
+
+Checking the CCR on the train data
+```{r}
+pred <- fitted(logistic5)
+pred_test <- predict(logistic5, newdata = select(test_logistic, -id), 
+                     type = 'response')
+acc <- 0
+thresh <- 0
+for (i in seq(0,1,0.01)){
+    tab <- table(test_logistic$responded, pred_test>i)
+    CCR <- sum(diag(tab))/sum(tab)
+    if(CCR > acc){
+        acc <- CCR
+        thresh <- i
+        cat(paste(thresh, acc, " "), "\n")
+    }
+}
+
+thresh
+caret::confusionMatrix(train_logistic$responded, as.integer(pred>thresh))
+```
+
+Checking the CCR on the test data
+```{r}
+caret::confusionMatrix(test_logistic$responded, as.integer(pred_test>thresh))
+```
+
+**CCR on the test data = 0.929**
+
+Checking the F1 score of this logistic model
+```{r}
+F_meas(factor(as.integer(pred_test>thresh)), 
+       reference = as.factor(test_logistic$responded), relevant = "1")
+```
+
+**F1 score on the test data = 0.4444**
 
 
 ## Multiple Regression Model
 
-Fitting a multiple regression model on `targdol` as response but only where `targdol>0`. We also need to remove the `responded` variable from this training data because responded will always be 1 in this case since we are only considering `targdol>0`.
-
-```{r}
-train2 <- train %>%
-    filter(targdol>0) %>%
-    select(-responded) %>%
-    mutate(tempad = as.Date(datead6, origin = "1970-01-01")) %>%
-    mutate(templp = as.Date(datelp6, origin = "1970-01-01")) %>%
-    filter(year(tempad)>=1985 & year(tempad)<=2012) %>%
-    filter(year(templp)>=2003 & year(templp)<=2012) %>%
-    select(-tempad, -templp)
-```
-
-Checking univariate distributions of the variables
-```{r}
-hist(train2$datead6, breaks = 50)
-hist(train2$datelp6, breaks = 50)
-hist(train2$slstyr, breaks = 50)
-hist(train2$slslyr, breaks = 50)
-hist(train2$sls2ago, breaks = 50)
-hist(train2$sls3ago, breaks = 50)
-hist(train2$slshist, breaks = 50)
-hist(train2$ordtyr, breaks = 50)
-hist(train2$ordlyr, breaks = 50)
-hist(train2$ord2ago, breaks = 50)
-hist(train2$ord3ago, breaks = 50)
-hist(train2$ordhist, breaks = 50)
-# hist(train2$lpurseason)
-```
-
-Checking distributions after log transformation
-```{r}
-hist(log(train2$slstyr+1), breaks = 50)
-hist(log(train2$slslyr+1), breaks = 50)
-hist(log(train2$sls2ago+1), breaks = 50)
-hist(log(train2$sls3ago+1), breaks = 50)
-hist(log(train2$slshist+1), breaks = 50) # log transformation definitely helped
-hist(log(train2$ordtyr+1), breaks = 50)
-hist(log(train2$ordlyr+1), breaks = 50)
-hist(log(train2$ord2ago+1), breaks = 50)
-hist(log(train2$ord3ago+1), breaks = 50)
-hist(log(train2$ordhist+1), breaks = 50)
-```
-
-## OUTLIER ANALYSIS
-
-I want to see if the univariate outliers among different columns are are the same. If so then eliminate them.
-
-### For slstyr
-```{r}
-hist(train2$slstyr, breaks = 50, main = "slstyr with outliers")
-b <- boxplot.stats(train2$slstyr)
-100*length(b$out)/length(train2$slstyr) # percentage of outliers
-var_name <- ifelse(train2$slstyr %in% b$out, NA, train2$slstyr)
-hist(var_name, breaks = 50, main = "slstyr without outliers")
-hist(log(var_name+1), breaks = 50, main = "log slstyr without outliers")
-
-slstyr_outliers <- which(train2$slstyr %in% b$out)
-```
+Fitting a multiple regression model on `targdol` as response but only where `targdol>0`. 
 
 
-### For slslyr
-```{r}
-hist(train2$slslyr, breaks = 50, main = "slslyr with outliers")
-b <- boxplot.stats(train2$slslyr)
-100*length(b$out)/length(train2$slslyr) # percentage of outliers
-var_name <- ifelse(train2$slslyr %in% b$out, NA, train2$slslyr)
-hist(var_name, breaks = 50, main = "slslyr without outliers")
-hist(log(var_name+1), breaks = 50, main = "log slslyr without outliers")
-
-slslyr_outliers <- which(train2$slslyr %in% b$out)
-```
 
 
-### For sls2ago
-```{r}
-hist(train2$sls2ago, breaks = 50, main = "sls2ago with outliers")
-b <- boxplot.stats(train2$sls2ago)
-100*length(b$out)/length(train2$sls2ago) # percentage of outliers
-var_name <- ifelse(train2$sls2ago %in% b$out, NA, train2$sls2ago)
-hist(var_name, breaks = 50, main = "sls2ago without outliers")
-hist(log(var_name+1), breaks = 50, main = "log sls2ago without outliers")
+<!-- ## OUTLIER ANALYSIS -->
 
-sls2ago_outliers <- which(train2$sls2ago %in% b$out)
-```
+<!-- I want to see if the univariate outliers among different columns are are the same. If so then eliminate them. -->
+
+<!-- ### For slstyr -->
+<!-- ```{r} -->
+<!-- hist(train2$slstyr, breaks = 50, main = "slstyr with outliers") -->
+<!-- b <- boxplot.stats(train2$slstyr) -->
+<!-- 100*length(b$out)/length(train2$slstyr) # percentage of outliers -->
+<!-- var_name <- ifelse(train2$slstyr %in% b$out, NA, train2$slstyr) -->
+<!-- hist(var_name, breaks = 50, main = "slstyr without outliers") -->
+<!-- hist(log(var_name+1), breaks = 50, main = "log slstyr without outliers") -->
+
+<!-- slstyr_outliers <- which(train2$slstyr %in% b$out) -->
+<!-- ``` -->
+
+
+<!-- ### For slslyr -->
+<!-- ```{r} -->
+<!-- hist(train2$slslyr, breaks = 50, main = "slslyr with outliers") -->
+<!-- b <- boxplot.stats(train2$slslyr) -->
+<!-- 100*length(b$out)/length(train2$slslyr) # percentage of outliers -->
+<!-- var_name <- ifelse(train2$slslyr %in% b$out, NA, train2$slslyr) -->
+<!-- hist(var_name, breaks = 50, main = "slslyr without outliers") -->
+<!-- hist(log(var_name+1), breaks = 50, main = "log slslyr without outliers") -->
+
+<!-- slslyr_outliers <- which(train2$slslyr %in% b$out) -->
+<!-- ``` -->
+
+
+<!-- ### For sls2ago -->
+<!-- ```{r} -->
+<!-- hist(train2$sls2ago, breaks = 50, main = "sls2ago with outliers") -->
+<!-- b <- boxplot.stats(train2$sls2ago) -->
+<!-- 100*length(b$out)/length(train2$sls2ago) # percentage of outliers -->
+<!-- var_name <- ifelse(train2$sls2ago %in% b$out, NA, train2$sls2ago) -->
+<!-- hist(var_name, breaks = 50, main = "sls2ago without outliers") -->
+<!-- hist(log(var_name+1), breaks = 50, main = "log sls2ago without outliers") -->
+
+<!-- sls2ago_outliers <- which(train2$sls2ago %in% b$out) -->
+<!-- ``` -->
 
 
 
 
 Fitting the linear model
 ```{r}
-lmfit <- lm(targdol ~ . , data = select(train2, -id))
-summary(lmfit)
+fit1 <- lm(targdol ~ . , data = select(train, -id))
+summary(fit1)
 
-lmfit <- lm(I(log(targdol+1)) ~ I(log(slstyr+1)) + I(log(slslyr+1)) + 
-                     I(log(sls2ago+1)) + I(log(sls3ago+1)) + I(log(slshist+1)) + 
-                     I(log(ordtyr+1)) + 
-                     I(log(ordhist+1)) + datead6 + datelp6, 
-                 data = select(train2, -id))
-               
-summary(lmfit)
+fit2 <- lm(I(log(targdol+1)) ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
+                I(log(sls2ago + K)) + I(log(sls3ago + K)) + I(log(slshist + K)) +
+                I(log(ordtyr + K)) + I(log(ordlyr + K)) +
+                I(log(ord2ago + K)) + I(log(ord3ago + K)) + I(log(ordhist + K)) +
+                I(log(sprord+K)) + I(log(falord+K)) +
+                I(log(avg_amount + K)) + large_avg + active + lifetime + recency + lpurseason,
+                 data = select(train, -id))
+
+summary(fit2)
 ```
 
-The $R^2$ of the model is around 0.08, which is extremly poor.
+<!-- The $R^2$ of the model is around 0.08, which is extremly poor. -->
 
-Variance inflation factors
-```{r}
-vif(lmfit)
-```
+<!-- Variance inflation factors -->
+<!-- ```{r} -->
+<!-- vif(lmfit) -->
+<!-- ``` -->
 
-The variance inflation factors do not indicate any multicollinearity among the predictors.
+<!-- The variance inflation indicate multicollinearity. -->
 
-## Checking for outliers
+<!-- ## Checking for outliers -->
 
-### Influential Points
-```{r}
-h <- hatvalues(lmfit)
-n <- nrow(train2)
-p <- length(coef(lmfit)) - 1
-influential <- which(h>2*(p+1)/n)
-length(influential)
-```
+<!-- ### Influential Points -->
+<!-- ```{r} -->
+<!-- h <- hatvalues(lmfit) -->
+<!-- n <- nrow(train2) -->
+<!-- p <- length(coef(lmfit)) - 1 -->
+<!-- influential <- which(h>2*(p+1)/n) -->
+<!-- length(influential) -->
+<!-- ``` -->
 
-There are 343 influential points.
+<!-- There are 343 influential points. -->
 
-### Cooks Distance
+<!-- ### Cooks Distance -->
 
-```{r}
-cookdist <- cooks.distance(lmfit)
-cooks <- which(cookdist>4/(n-p-1))
-names(cooks) <- c()
-length(cooks)
-```
+<!-- ```{r} -->
+<!-- cookdist <- cooks.distance(lmfit) -->
+<!-- cooks <- which(cookdist>4/(n-p-1)) -->
+<!-- names(cooks) <- c() -->
+<!-- length(cooks) -->
+<!-- ``` -->
 
-There are 200 outliers according to cooks distance.
+<!-- There are 200 outliers according to cooks distance. -->
 
-Looking at these outliers in the original data
-```{r}
-sale[train2[cooks, ]$id, ]
-```
+<!-- Looking at these outliers in the original data -->
+<!-- ```{r} -->
+<!-- sale[train2[cooks, ]$id, ] -->
+<!-- ``` -->
 
-Removing these outliers and fitting the linear model again
-```{r}
-lmfit2 <- lm(targdol ~ . , data = select(train2[-cooks, ], -id))
-summary(lmfit2)
-```
+<!-- Removing these outliers and fitting the linear model again -->
+<!-- ```{r} -->
+<!-- lmfit2 <- lm(targdol ~ . , data = select(train2[-cooks, ], -id)) -->
+<!-- summary(lmfit2) -->
+<!-- ``` -->
 
-The $R^2$ goes up to 0.1
+<!-- The $R^2$ goes up to 0.1 -->
 
-Removing the non significant variables.
-```{r}
-lmfit3 <- lm(targdol ~ . , data = select(train2[-cooks, ], -id, -datelp6, -sls3ago, -ordhist))
-summary(lmfit3)
-```
+<!-- Removing the non significant variables. -->
+<!-- ```{r} -->
+<!-- lmfit3 <- lm(targdol ~ . , data = select(train2[-cooks, ], -id, -datelp6, -sls3ago, -ordhist)) -->
+<!-- summary(lmfit3) -->
+<!-- ``` -->
 
-Doesn't affect the $R^2$.
+<!-- Doesn't affect the $R^2$. -->
 
-Best subsets regression
-```{r}
-bestAIC <- bestglm(data.frame(select(train2, -id, -targdol), train2$targdol), IC="AIC")
-summary(bestAIC$BestModel)
-```
+<!-- Best subsets regression -->
+<!-- ```{r} -->
+<!-- bestAIC <- bestglm(data.frame(select(train2, -id, -targdol), train2$targdol), IC="AIC") -->
+<!-- summary(bestAIC$BestModel) -->
+<!-- ``` -->
 
-The R squared is still bad.
+<!-- The R squared is still bad. -->
 
-## Checking for interaction terms
+<!-- ## Checking for interaction terms -->
+
 
 Creating a matrix of all possible interaction terms
 ```{r}
-all_interact_pair <- model.matrix(~(datead6+datelp6+slstyr+slslyr+sls2ago+sls3ago+slshist+ordtyr+ordlyr+ord2ago+ord3ago+ordhist+lpurseason)^2, select(train2, -id, -targdol))
+all_interact_pair <- model.matrix(~(datead6+datelp6+slstyr+slslyr+sls2ago+sls3ago+slshist+ordtyr+ordlyr+ord2ago+ord3ago+ordhist+lpurseason)^2, select(train, -id, -targdol))
+
+log_all_interact_pair <- model.matrix(~(I(log(slstyr + K)) + I(log(slslyr + K)) +
+                I(log(sls2ago + K)) + I(log(sls3ago + K)) + I(log(slshist + K)) +
+                I(log(ordtyr + K)) + I(log(ordlyr + K)) + I(log(ord2ago + K)) +
+                I(log(ord3ago + K)) + I(log(ordhist + K)) + I(log(sprord+K)) + 
+                I(log(falord+K)) + I(log(avg_amount + K)) + large_avg + active +
+                lifetime + recency + lpurseason + datead6 + datelp6)^2,
+                select(train, -id, -targdol))
 
 
-tr <- log(all_interact_pair+1)
+
+
+
+# tr <- log(all_interact_pair+1)
+tr <- log_all_interact_pair
 # nsv <- nearZeroVar(tr, saveMetrics = TRUE)
 # tr = tr[,!nsv$nzv]
 tr_cor <- as.matrix(cor(tr))
@@ -435,24 +632,38 @@ tr_cor_melt <- arrange(melt(tr_cor), -abs(value))
 tr_cor_melt <- filter(tr_cor_melt, Var1 != Var2)
 tr_cor_melt <- tr_cor_melt[seq(from=1, to=nrow(tr_cor_melt), by=2),]
 thresh = 0.7 # displaying only correlations above threshold
+filter(tr_cor_melt, abs(value)>thresh)
+```
+
+Removing the variables which are highly correlated with another variable.
+```{r}
 remove_cols <- filter(tr_cor_melt, abs(value)>thresh) %>% select(Var1) %>% unique()
 remove_cols$Var1 <- as.character(remove_cols$Var1)
 tr <- tr[, -which(colnames(tr) %in% remove_cols$Var1)]
 ```
 
-Fitting a backwards stepwise regression with all the interaction variables.
+#### Fitting a backwards stepwise regression with all the interaction variables.
+
+Backwards stepwise regression on the log of targdol
 ```{r}
-all_fit <- lm(train2$targdol ~ . , data = data.frame(log(all_interact_pair+1)))
-bwd <- step(all_fit, direction = "both")
+all_fit_log <- lm(log(train$targdol+K) ~ . , data = data.frame(log_all_interact_pair))
+fit3 <- step(all_fit_log, direction = "both")
 ```
+
+Best subsets regression on targdol
+```{r}
+all_fit <- lm(train$targdol ~ . , data = data.frame(all_interact_pair))
+fit4 <- step(all_fit, direction = "both")
+```
+
 
 VIFs for the stepwise regression model.
 ```{r}
 vifs <- vif(bwd)
 sort(vifs)
 coefs <- names(vifs)
-log_all_interact_pair <- data.frame(log(all_interact_pair+1))
-log_all_interact_pair <- log_all_interact_pair[, which(names(log_all_interact_pair) %in% coefs)]
+log_all_interact_pair_df <- data.frame(log_all_interact_pair)
+log_all_interact_pair_df <- log_all_interact_pair_df[, which(names(log_all_interact_pair_df) %in% coefs)]
 
 # best_bwd <- lm(train2$targdol ~ ., data = log_all_interact)
 # summary(best_bwd)
@@ -469,13 +680,13 @@ log_all_interact_pair <- log_all_interact_pair[, which(names(log_all_interact_pa
 
 Best subsets regression on targdol
 ```{r}
-bestAIC <- bestglm(data.frame(log_all_interact_pair, train2$targdol), IC="AIC")
+bestAIC <- bestglm(data.frame(log_all_interact_pair_df, train$targdol), IC="AIC")
 summary(bestAIC$BestModel)
 ```
 
 Best subsets regression on logarithm of targdol
 ```{r}
-bestAIClog <- bestglm(data.frame(log_all_interact_pair, log(train2$targdol)), IC="AIC")
+bestAIClog <- bestglm(data.frame(log_all_interact_pair_df, log(train$targdol+K)), IC="AIC")
 summary(bestAIClog$BestModel)
 ```
 
@@ -483,26 +694,41 @@ This model has an adjusted $R^2$ of 0.1517.
 
 Performing Lasso regression on all possible interaction terms (not just two degree interactions).
 ```{r}
-all_interact <- model.matrix(~(datead6*datelp6*slstyr*slslyr*sls2ago*sls3ago*slshist*ordtyr*ordlyr*ord2ago*ord3ago*ordhist*lpurseason), select(train2, -id, -targdol))
-log_all_interact <- log(all_interact+0.0001)
-lassocv <- cv.glmnet(log_all_interact, log(train2$targdol+0.0001), alpha=1, nfold=3, lambda=seq(0,10,0.01))
+lassocv <- cv.glmnet(log_all_interact_pair, log(train$targdol+K), alpha=1, nfold=3, lambda=seq(0,10,0.01))
 lambdalasso=lassocv$lambda.min
 print(lambdalasso)
 plot(lassocv)
 small.lambda.index <- which(lassocv$lambda == lassocv$lambda.min)
 small.lambda.betas <- coef(lassocv$glmnet.fit)[,small.lambda.index]
 print(small.lambda.betas)
-plot(lassofit,xvar="lambda",label=TRUE, main="Coeffs of Lasso Regression", type="l", xlab=expression("log_lambda"), ylab="Coeff")
+plot(lassocv,xvar="lambda",label=TRUE, main="Coeffs of Lasso Regression", type="l", xlab=expression("log_lambda"), ylab="Coeff")
 abline(h=0); 
 abline(v=log(lassocv$lambda.min))
 summary(lassocv)
 ```
 
+
+Fitting a linear model using the significant coefficients of the LASSO REGRESSION
+
+```{r}
+lmfit2 <- lm(I(log(targdol+1)) ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
+                I(log(sls2ago + K)) + I(log(sls3ago + K)) + I(log(slshist + K)) +
+                I(log(ordtyr + K)) + I(log(ordlyr + K)) +
+                I(log(ord2ago + K)) + I(log(ord3ago + K)) + I(log(ordhist + K)) +
+                I(log(sprord+K)) + I(log(falord+K)) +
+                I(log(avg_amount + K)) + large_avg + active + lifetime + recency + lpurseason + 
+                I(log(slstyr + K)):I(log(slslyr + K)) + I(log(slstyr + K)):I(log(ordtyr + K)) + I(log(ordtyr + K)):I(log(ordlyr + K)) + I(log(ordtyr + K)):I(log(ord3ago + K)) + I(log(ordlyr + K)):I(log(ord3ago + K)) + I(log(sprord + K)):I(log(falord + K)) + large_avg:active + large_avg:lifetime,
+                 data = select(train, -id))
+
+summary(lmfit2)
+```
+
+
 Taking the non zero coefficients from lasso regression and performing linear regression on them.
 ```{r}
 log_all_interact_df <- data.frame(log_all_interact)
 log_all_interact_df <- log_all_interact_df[, which(gsub("\\.",":",names(log_all_interact_df)) %in% names(small.lambda.betas[small.lambda.betas>0]))]
-all_interact_fit <- lm(I(log(train2$targdol+0.0001)) ~ ., data = log_all_interact_df)
+all_interact_fit <- lm(I(log(train2$targdol+K)) ~ ., data = log_all_interact_df)
 
 summary(all_interact_fit)
 ```
