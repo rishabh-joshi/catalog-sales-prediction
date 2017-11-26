@@ -58,19 +58,18 @@ Removing last purchase year from the data because we have already accounted for 
 train_logistic <- select(train, -train, -targdol, -lpuryear, -lpurseason_year)
 test_logistic <- select(test, -train, -targdol, -lpuryear, -lpurseason_year)
 
-train <- train %>%
+train_linear <- train %>%
     filter(responded==1) %>%
-    select(-train, -lpuryear, -responded, -lpurseason_year)
+    select(-train, -lpuryear, -responded, -lpurseason_year, -recency_bin) 
 
-test <- test %>%
-    filter(responded==1) %>%
-    select(-train, -lpuryear, -responded, -lpurseason_year)
+test_linear <- test %>%
+    select(-train, -lpuryear, -responded, -lpurseason_year, -recency_bin)
 ```
 
 
 Checking for correlation between the predictors
 ```{r}
-tr <- select(train, -targdol, -lpurseason, -large_avg, -pur3yr, -slscmp)
+tr <- select(train_linear, -targdol, -lpurseason, -large_avg, -pur3yr, -slscmp)
 tr_cor <- as.matrix(cor(tr))
 tr_cor_melt <- arrange(melt(tr_cor), -abs(value))
 tr_cor_melt <- filter(tr_cor_melt, Var1 != Var2)
@@ -128,29 +127,31 @@ ggplot(data = train, aes(x = ordtyr, y = targdol)) +
 
 Checking univariate distributions of the variables
 ```{r}
-qplot(x = targdol, data = train, geom = "histogram")
-qplot(x = datead6, data = train, geom = "histogram")
-qplot(x = datelp6, data = train, geom = "histogram")
-qplot(x = slstyr, data = train, geom = "histogram")
-qplot(x = slslyr, data = train, geom = "histogram")
-qplot(x = sls2ago, data = train, geom = "histogram")
-qplot(x = sls3ago, data = train, geom = "histogram")
-qplot(x = slshist, data = train, geom = "histogram")
-qplot(x = ordtyr, data = train, geom = "histogram")
-qplot(x = ordlyr, data = train, geom = "histogram")
-qplot(x = ord2ago, data = train, geom = "histogram")
-qplot(x = ord3ago, data = train, geom = "histogram")
-qplot(x = ordhist, data = train, geom = "histogram")
+qplot(x = targdol, data = train_linear, geom = "histogram")
+qplot(x = datead6, data = train_linear, geom = "histogram")
+qplot(x = datelp6, data = train_linear, geom = "histogram")
+qplot(x = slstyr, data = train_linear, geom = "histogram")
+qplot(x = slslyr, data = train_linear, geom = "histogram")
+qplot(x = sls2ago, data = train_linear, geom = "histogram")
+qplot(x = sls3ago, data = train_linear, geom = "histogram")
+qplot(x = slshist, data = train_linear, geom = "histogram")
+qplot(x = ordtyr, data = train_linear, geom = "histogram")
+qplot(x = ordlyr, data = train_linear, geom = "histogram")
+qplot(x = ord2ago, data = train_linear, geom = "histogram")
+qplot(x = ord3ago, data = train_linear, geom = "histogram")
+qplot(x = ordhist, data = train_linear, geom = "histogram")
 
-qplot(x = falord, data = train, geom = "histogram")
-qplot(x = sprord, data = train, geom = "histogram")
-qplot(x = recency_bin, data = train, geom = "histogram")
-qplot(x = recency, data = train, geom = "histogram")
-qplot(x = lifetime, data = train, geom = "histogram")
-qplot(x = active, data = train, geom = "histogram")
-qplot(x = avg_amount, data = train, geom = "histogram")
+qplot(x = falord, data = train_linear, geom = "histogram")
+qplot(x = sprord, data = train_linear, geom = "histogram")
+qplot(x = recency_bin, data = train_linear, geom = "histogram")
+qplot(x = recency, data = train_linear, geom = "histogram")
+qplot(x = lifetime, data = train_linear, geom = "histogram")
+qplot(x = active, data = train_linear, geom = "histogram")
+qplot(x = avg_amount, data = train_linear, geom = "histogram")
 # qplot(x = large_avg, data = train, geom = "histogram")
 # qplot(x = lpurseason, data = train, geom = "histogram")
+qplot(x = ord4bfr, data = train_linear, geom = "histogram")
+qplot(x = sls4bfr, data = train_linear, geom = "histogram")
 ```
 
 Checking distributions after log transformation. Adding a small displacement to avoid taking log of zeros.
@@ -184,6 +185,8 @@ qplot(x = log(recency_bin + K), data = train, geom = "histogram")
 # qplot(x = log(active + K), data = train, geom = "histogram")
 qplot(x = log(avg_amount + K), data = train, geom = "histogram")
 # qplot(x = log(large_avg + K), data = train, geom = "histogram")
+qplot(x = log(ord4bfr + K), data = train, geom = "histogram")
+qplot(x = log(sls4bfr + K), data = train, geom = "histogram")
 ```
 
 ## Logistic regression models
@@ -473,7 +476,18 @@ F_meas(factor(as.integer(pred_test>thresh)),
 
 **F1 score on the test data = 0.4444**
 
-### Writing the predicted probabilites in a file
+### Summary of all the logistic regression models
+
+The CCR/accuracies and F1 scores of all the logistic regression models are given below:
+
+- logistic1: CCR = 0.9152, F1 Score = 0.314
+- logistic2: CCR = 0.9242, F1 Score = 0.39
+- logistic3: CCR = 0.9276, F1 Score = 0.4479
+- logistic4: CCR = 0.9283, F1 Score = 0.4613
+- logistic5: CCR = 0.929, F1 Score = 0.4444
+
+
+### Writing the predicted probabilites to a file
 
 ```{r}
 # prob_test <- data.frame(id = test_logistic$id, prob = round(pred_test, 3), responded = test_logistic$responded)
@@ -489,148 +503,172 @@ write.csv(prob_test, "prob.csv", row.names=FALSE)
 
 Fitting a multiple regression model on `targdol` as response but only where `targdol>0`. 
 
+### linear1
 
-
-
-<!-- ## OUTLIER ANALYSIS -->
-
-<!-- I want to see if the univariate outliers among different columns are are the same. If so then eliminate them. -->
-
-<!-- ### For slstyr -->
-<!-- ```{r} -->
-<!-- hist(train2$slstyr, breaks = 50, main = "slstyr with outliers") -->
-<!-- b <- boxplot.stats(train2$slstyr) -->
-<!-- 100*length(b$out)/length(train2$slstyr) # percentage of outliers -->
-<!-- var_name <- ifelse(train2$slstyr %in% b$out, NA, train2$slstyr) -->
-<!-- hist(var_name, breaks = 50, main = "slstyr without outliers") -->
-<!-- hist(log(var_name+1), breaks = 50, main = "log slstyr without outliers") -->
-
-<!-- slstyr_outliers <- which(train2$slstyr %in% b$out) -->
-<!-- ``` -->
-
-
-<!-- ### For slslyr -->
-<!-- ```{r} -->
-<!-- hist(train2$slslyr, breaks = 50, main = "slslyr with outliers") -->
-<!-- b <- boxplot.stats(train2$slslyr) -->
-<!-- 100*length(b$out)/length(train2$slslyr) # percentage of outliers -->
-<!-- var_name <- ifelse(train2$slslyr %in% b$out, NA, train2$slslyr) -->
-<!-- hist(var_name, breaks = 50, main = "slslyr without outliers") -->
-<!-- hist(log(var_name+1), breaks = 50, main = "log slslyr without outliers") -->
-
-<!-- slslyr_outliers <- which(train2$slslyr %in% b$out) -->
-<!-- ``` -->
-
-
-<!-- ### For sls2ago -->
-<!-- ```{r} -->
-<!-- hist(train2$sls2ago, breaks = 50, main = "sls2ago with outliers") -->
-<!-- b <- boxplot.stats(train2$sls2ago) -->
-<!-- 100*length(b$out)/length(train2$sls2ago) # percentage of outliers -->
-<!-- var_name <- ifelse(train2$sls2ago %in% b$out, NA, train2$sls2ago) -->
-<!-- hist(var_name, breaks = 50, main = "sls2ago without outliers") -->
-<!-- hist(log(var_name+1), breaks = 50, main = "log sls2ago without outliers") -->
-
-<!-- sls2ago_outliers <- which(train2$sls2ago %in% b$out) -->
-<!-- ``` -->
-
-
-
-
-Fitting the linear model
+Fitting the linear model with targdol as reponse
 ```{r}
-fit1 <- lm(targdol ~ . , data = select(train, -id))
-summary(fit1)
+linear1 <- lm(targdol ~ . -slshist - ordhist - datead6 - datelp6 -ord4bfr, data = select(train_linear, -id))
 
-fit2 <- lm(I(log(targdol+1)) ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
-                I(log(sls2ago + K)) + I(log(sls3ago + K)) + I(log(slshist + K)) +
-                I(log(ordtyr + K)) + I(log(ordlyr + K)) +
-                I(log(ord2ago + K)) + I(log(ord3ago + K)) + I(log(ordhist + K)) +
-                I(log(sprord+K)) + I(log(falord+K)) +
-                I(log(avg_amount + K)) + large_avg + active + lifetime + recency + lpurseason,
-                 data = select(train, -id))
+summary(linear1)
 
-summary(fit2)
+pred_test <- predict(linear1, newdata = test_linear)
+
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
 ```
 
-<!-- The $R^2$ of the model is around 0.08, which is extremly poor. -->
+### linear2
 
-<!-- Variance inflation factors -->
-<!-- ```{r} -->
-<!-- vif(lmfit) -->
-<!-- ``` -->
+```{r}
+linear2 <- lm(targdol ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
+                  I(log(sls2ago + K)) + I(log(sls3ago + K)) + 
+                  I(log(slshist + K)) + I(log(ordtyr + K)) + 
+                  I(log(ordlyr + K)) + I(log(ord2ago + K)) + 
+                  I(log(ord3ago + K)) + I(log(ordhist + K)) +
+                  I(log(sprord+K)) + I(log(falord+K)) + 
+                  I(log(avg_amount + K)) + large_avg + active + 
+                  lifetime + recency + lpurseason +
+                  
+                  recency:active + 
+                  I(log(ord2ago + K)):I(log(ord3ago + K)) +
+                I(log(slslyr + K)):I(log(sls2ago + K)) + 
+                I(log(sls2ago + K)):I(log(sls3ago + K)) +
+                I(log(ord3ago + K)):I(log(ord4bfr + K)) +
+                  I(log(avg_amount + K)):recency
+              ,data = select(train_linear, -id))
 
-<!-- The variance inflation indicate multicollinearity. -->
+summary(linear2)
 
-<!-- ## Checking for outliers -->
+pred_test <- predict(linear2, newdata = test_linear)
 
-<!-- ### Influential Points -->
-<!-- ```{r} -->
-<!-- h <- hatvalues(lmfit) -->
-<!-- n <- nrow(train2) -->
-<!-- p <- length(coef(lmfit)) - 1 -->
-<!-- influential <- which(h>2*(p+1)/n) -->
-<!-- length(influential) -->
-<!-- ``` -->
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+```
 
-<!-- There are 343 influential points. -->
+### linear3
 
-<!-- ### Cooks Distance -->
+```{r}
+linear3 <- lm(I(log(targdol+K)) ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
+                  I(log(sls2ago + K)) + I(log(sls3ago + K)) + 
+                  I(log(slshist + K)) + I(log(ordtyr + K)) + 
+                  I(log(ordlyr + K)) + I(log(ord2ago + K)) + 
+                  I(log(ord3ago + K)) + I(log(ordhist + K)) +
+                  I(log(sprord+K)) + I(log(falord+K)) + 
+                  I(log(avg_amount + K)) + large_avg + active + 
+                  lifetime + recency + lpurseason, 
+              data = select(train_linear, -id))
 
-<!-- ```{r} -->
-<!-- cookdist <- cooks.distance(lmfit) -->
-<!-- cooks <- which(cookdist>4/(n-p-1)) -->
-<!-- names(cooks) <- c() -->
-<!-- length(cooks) -->
-<!-- ``` -->
+summary(linear3)
 
-<!-- There are 200 outliers according to cooks distance. -->
+pred_test <- predict(linear3, newdata = test_linear)
+pred_test <- exp(pred_test)-K
 
-<!-- Looking at these outliers in the original data -->
-<!-- ```{r} -->
-<!-- sale[train2[cooks, ]$id, ] -->
-<!-- ``` -->
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+```
 
-<!-- Removing these outliers and fitting the linear model again -->
-<!-- ```{r} -->
-<!-- lmfit2 <- lm(targdol ~ . , data = select(train2[-cooks, ], -id)) -->
-<!-- summary(lmfit2) -->
-<!-- ``` -->
+### linear4
 
-<!-- The $R^2$ goes up to 0.1 -->
+```{r}
+linear4 <- lm(I(log(targdol+K)) ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
+                  I(log(sls2ago + K)) + I(log(sls3ago + K)) + 
+                  I(log(slshist + K)) + I(log(ordtyr + K)) + 
+                  I(log(ordlyr + K)) + I(log(ord2ago + K)) + 
+                  I(log(ord3ago + K)) + I(log(ordhist + K)) +
+                  I(log(sprord+K)) + I(log(falord+K)) + 
+                  I(log(avg_amount + K)) + large_avg + active + 
+                  lifetime + recency + lpurseason + 
+                  
+                I(log(slstyr + K)):I(log(slslyr + K)) +
+                I(log(slslyr + K)):I(log(sls2ago + K)) + 
+                I(log(sls2ago + K)):I(log(sls3ago + K)) +
+                I(log(sls3ago + K)):I(log(sls4bfr + K)) 
+            
+                # recency:active + lifetime:slscmp + 
+                # I(log(slstyr + K)):I(log(ordtyr+ K)) + 
+                # I(log(slstyr + K)):recency + 
+                #     
+                #     I(log(slslyr + K)):recency +
+                #     I(log(sls2ago + K)):I(log(ord2ago + K)) + 
+                #     I(log(avg_amount + K)):recency
+              ,data = select(train_linear, -id))
 
-<!-- Removing the non significant variables. -->
-<!-- ```{r} -->
-<!-- lmfit3 <- lm(targdol ~ . , data = select(train2[-cooks, ], -id, -datelp6, -sls3ago, -ordhist)) -->
-<!-- summary(lmfit3) -->
-<!-- ``` -->
+summary(linear4)
 
-<!-- Doesn't affect the $R^2$. -->
+pred_test <- predict(linear4, newdata = test_linear)
+pred_test <- exp(pred_test)-K
 
-<!-- Best subsets regression -->
-<!-- ```{r} -->
-<!-- bestAIC <- bestglm(data.frame(select(train2, -id, -targdol), train2$targdol), IC="AIC") -->
-<!-- summary(bestAIC$BestModel) -->
-<!-- ``` -->
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+```
 
-<!-- The R squared is still bad. -->
 
-<!-- ## Checking for interaction terms -->
+### linear5
 
+```{r}
+linear5 <- lm(targdol ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
+                  I(log(sls2ago + K)) + I(log(sls3ago + K)) + 
+                  I(log(slshist + K)) + I(log(ordtyr + K)) + 
+                  I(log(ordlyr + K)) + I(log(ord2ago + K)) + 
+                  I(log(ord3ago + K)) + I(log(ordhist + K)) +
+                  I(log(sprord+K)) + I(log(falord+K)) + 
+                  I(log(avg_amount + K)) + large_avg + active + 
+                  lifetime + recency + lpurseason + 
+
+                I(log(slstyr + K)):I(log(slslyr + K)) +
+                I(log(slslyr + K)):I(log(sls2ago + K)) +
+                I(log(sls2ago + K)):I(log(sls3ago + K)) +
+                I(log(sls3ago + K)):I(log(sls4bfr + K)) +
+            
+                recency:active + lifetime:slscmp +
+                I(log(slstyr + K)):I(log(ordtyr+ K)) +
+                I(log(slstyr + K)):recency +
+
+                    I(log(slslyr + K)):recency +
+                    I(log(sls2ago + K)):I(log(ord2ago + K)) +
+                    I(log(avg_amount + K)):recency
+              ,data = train_linear)
+
+summary(linear5)
+
+pred_test <- predict(linear5, newdata = test_linear)
+# pred_test <- exp(pred_test)-K
+
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+```
+
+
+## Checking for interaction terms
 
 Creating a matrix of all possible interaction terms
 ```{r}
-all_interact_pair <- model.matrix(~(datead6+datelp6+slstyr+slslyr+sls2ago+sls3ago+slshist+ordtyr+ordlyr+ord2ago+ord3ago+ordhist+lpurseason)^2, select(train, -id, -targdol))
+all_interact_train <- model.matrix(~(slstyr + slslyr + 
+                                         sls2ago + sls3ago + ordtyr + 
+                                         ordlyr + ord2ago + ord3ago + 
+                                         lpurseason + falord + sprord + recency +
+                                         lifetime + active + avg_amount + 
+                                         large_avg + pur3yr + slscmp + sls4bfr + 
+                                         ord4bfr)^2, data = train_linear)
 
-log_all_interact_pair <- model.matrix(~(I(log(slstyr + K)) + I(log(slslyr + K)) +
-                I(log(sls2ago + K)) + I(log(sls3ago + K)) + I(log(slshist + K)) +
-                I(log(ordtyr + K)) + I(log(ordlyr + K)) + I(log(ord2ago + K)) +
-                I(log(ord3ago + K)) + I(log(ordhist + K)) + I(log(sprord+K)) + 
-                I(log(falord+K)) + I(log(avg_amount + K)) + large_avg + active +
-                lifetime + recency + lpurseason + datead6 + datelp6)^2,
-                select(train, -id, -targdol))
+log_all_interact_train <- model.matrix(~(I(log(slstyr + K)) + I(log(slslyr + K))+
+                I(log(sls2ago + K)) + I(log(sls3ago + K)) + I(log(sls4bfr + K)) +
+                I(log(ordtyr + K)) + I(log(ordlyr + K)) + I(log(ord2ago + K)) + 
+                I(log(ord3ago + K)) + I(log(sprord+K)) + I(log(falord+K)) + 
+                I(log(avg_amount + K)) + large_avg + active + lifetime + 
+                recency + lpurseason + avg_amount + pur3yr + slscmp)^2,
+                data = train_linear)
 
+all_interact_test <- model.matrix(~(slstyr + slslyr + 
+                                         sls2ago + sls3ago + ordtyr + 
+                                         ordlyr + ord2ago + ord3ago + 
+                                         lpurseason + falord + sprord + recency +
+                                         lifetime + active + avg_amount + 
+                                         large_avg + pur3yr + slscmp + sls4bfr + 
+                                         ord4bfr)^2, data = test_linear)
 
+log_all_interact_test <- model.matrix(~(I(log(slstyr + K)) + I(log(slslyr + K))+
+                I(log(sls2ago + K)) + I(log(sls3ago + K)) + I(log(sls4bfr + K)) +
+                I(log(ordtyr + K)) + I(log(ordlyr + K)) + I(log(ord2ago + K)) + 
+                I(log(ord3ago + K)) + I(log(sprord+K)) + I(log(falord+K)) + 
+                I(log(avg_amount + K)) + large_avg + active + lifetime + 
+                recency + lpurseason + avg_amount + pur3yr + slscmp)^2,
+                data = test_linear)
 
 
 
@@ -648,22 +686,37 @@ filter(tr_cor_melt, abs(value)>thresh)
 
 Removing the variables which are highly correlated with another variable.
 ```{r}
-remove_cols <- filter(tr_cor_melt, abs(value)>thresh) %>% select(Var1) %>% unique()
-remove_cols$Var1 <- as.character(remove_cols$Var1)
-tr <- tr[, -which(colnames(tr) %in% remove_cols$Var1)]
+# remove_cols <- filter(tr_cor_melt, abs(value)>thresh) %>% select(Var1) %>% unique()
+# remove_cols$Var1 <- as.character(remove_cols$Var1)
+# tr <- tr[, -which(colnames(tr) %in% remove_cols$Var1)]
 ```
 
 #### Fitting a backwards stepwise regression with all the interaction variables.
 
 Backwards stepwise regression on the log of targdol
 ```{r}
-all_fit_log <- lm(log(train$targdol+K) ~ . , data = data.frame(log_all_interact_pair))
+all_fit_log <- lm(log(train_linear$targdol+K) ~ . , data = data.frame(log_all_interact_train))
 fit3 <- step(all_fit_log, direction = "both")
+```
+
+Performing Lasso regression on all possible pairs of interaction terms.
+```{r}
+lassocv <- cv.glmnet(log_all_interact_train, log(train_linear$targdol+K), alpha=1, nfold=3, lambda=seq(0,10,0.01))
+lambdalasso=lassocv$lambda.min
+print(lambdalasso)
+plot(lassocv)
+small.lambda.index <- which(lassocv$lambda == lassocv$lambda.min)
+small.lambda.betas <- coef(lassocv$glmnet.fit)[,small.lambda.index]
+print(small.lambda.betas)
+plot(lassocv,xvar="lambda",label=TRUE, main="Coeffs of Lasso Regression", type="l", xlab=expression("log_lambda"), ylab="Coeff")
+abline(h=0); 
+abline(v=log(lassocv$lambda.min))
+summary(lassocv)
 ```
 
 Best subsets regression on targdol
 ```{r}
-all_fit <- lm(train$targdol ~ . , data = data.frame(all_interact_pair))
+all_fit <- lm(train_linear$targdol ~ . , data = data.frame(all_interact_train))
 fit4 <- step(all_fit, direction = "both")
 ```
 
@@ -688,13 +741,6 @@ log_all_interact_pair_df <- log_all_interact_pair_df[, which(names(log_all_inter
 # sort(vif(best_bwd), decreasing = TRUE)
 ```
 
-
-Best subsets regression on targdol
-```{r}
-bestAIC <- bestglm(data.frame(log_all_interact_pair_df, train$targdol), IC="AIC")
-summary(bestAIC$BestModel)
-```
-
 Best subsets regression on logarithm of targdol
 ```{r}
 bestAIClog <- bestglm(data.frame(log_all_interact_pair_df, log(train$targdol+K)), IC="AIC")
@@ -703,20 +749,18 @@ summary(bestAIClog$BestModel)
 
 This model has an adjusted $R^2$ of 0.1517.
 
-Performing Lasso regression on all possible interaction terms (not just two degree interactions).
+
+Best subsets regression on targdol
 ```{r}
-lassocv <- cv.glmnet(log_all_interact_pair, log(train$targdol+K), alpha=1, nfold=3, lambda=seq(0,10,0.01))
-lambdalasso=lassocv$lambda.min
-print(lambdalasso)
-plot(lassocv)
-small.lambda.index <- which(lassocv$lambda == lassocv$lambda.min)
-small.lambda.betas <- coef(lassocv$glmnet.fit)[,small.lambda.index]
-print(small.lambda.betas)
-plot(lassocv,xvar="lambda",label=TRUE, main="Coeffs of Lasso Regression", type="l", xlab=expression("log_lambda"), ylab="Coeff")
-abline(h=0); 
-abline(v=log(lassocv$lambda.min))
-summary(lassocv)
+bestAIC <- bestglm(data.frame(log_all_interact_pair_df, train$targdol), IC="AIC")
+summary(bestAIC$BestModel)
 ```
+
+
+
+
+
+
 
 
 Fitting a linear model using the significant coefficients of the LASSO REGRESSION
@@ -754,3 +798,58 @@ bwd <- step(all_interact_fit, direction = "both")
 bestAIClog_allinteract <- bestglm(data.frame(log_all_interact, log(train2$targdol)), IC="AIC")
 summary(bestAIClog_allinteract$BestModel)
 ```
+
+### Writing the predicted targdol to a file
+
+```{r}
+write.csv(targdol_test, "targdol.csv", row.names=FALSE)
+```
+
+## Evalutaing the fitted models
+
+Here we will evaluate the different combinations of the logistic and linear regression models that we have tried so far and see which of these models gets the lowest mean squared prediction error (statistical criterion) and the highest payoff (financial criterion).
+
+```{r}
+targdol_test <- read.csv("targdol.csv")
+prob_test <- read.csv("prob.csv")
+```
+
+### Statistical Criterion
+
+```{r}
+actual_targdol <- select(test_linear, id, targdol)
+linear_model <- linear2
+prob_targdol <- merge(prob_test, targdol_test, by = "id")
+prob_targdol <- merge(prob_targdol, actual_targdol, by = "id")
+names(prob_targdol) <- c("id", "prob", "pred_targdol", "actual_targdol")
+prob_targdol <- mutate(prob_targdol, expected_targdol = prob*pred_targdol)
+head(prob_targdol)
+p <- length(linear_model$coefficients) - 1
+n <- nrow(prob_targdol)
+MSPE <- sum((prob_targdol$actual_targdol - 
+                 prob_targdol$expected_targdol)^2)/(n-(p+1))
+MSPE
+```
+
+### Financial Criterion
+
+Sort in descending order of the expected targdol and grab the corresponding top 1000 actual targdol values.
+```{r}
+prob_targdol_arranged <- arrange(prob_targdol, desc(expected_targdol))
+payoff <- sum(prob_targdol_arranged[1:1000, ]$actual_targdol)
+payoff
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
