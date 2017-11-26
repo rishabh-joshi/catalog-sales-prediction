@@ -533,7 +533,8 @@ linear2 <- lm(targdol ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
                 I(log(slslyr + K)):I(log(sls2ago + K)) + 
                 I(log(sls2ago + K)):I(log(sls3ago + K)) +
                 I(log(ord3ago + K)):I(log(ord4bfr + K)) +
-                  I(log(avg_amount + K)):recency
+                  I(log(avg_amount + K)):recency + 
+                  pur3yr 
               ,data = select(train_linear, -id))
 
 summary(linear2)
