@@ -92,8 +92,8 @@ Selecting `datead6` within year of [1985, 2012] and `lpuryear` within [2003, 201
 
 Adding recency with bin sizes of 6 months.
 ```{r}
-sales$recency_bin <- 2*(2017 - sales$lpuryear)
-sales[sales$lpurseason == "spring",]$recency_bin <- 2*(2017 - sales[sales$lpurseason == "spring",]$lpuryear) + 1
+sales$recency_bin <- 2*(2012 - sales$lpuryear)
+sales[sales$lpurseason == "spring",]$recency_bin <- 2*(2012 - sales[sales$lpurseason == "spring",]$lpuryear) + 1
 ```
 
 Adding customer lifetime and recency by calculating days from date

@@ -40,14 +40,10 @@ Converting both the date variabels to their corresponding integer values, which 
 
 ```{r}
 train <- train %>%
-    mutate(datead6 = as.integer(ymd(datead6))) %>%
-    mutate(datelp6 = as.integer(ymd(datelp6))) %>%
     mutate(large_avg = factor(large_avg), pur3yr = factor(pur3yr)) %>%
     mutate(lpurseason = factor(lpurseason), slscmp = factor(slscmp))
 
 test <- test %>%
-    mutate(datead6 = as.integer(ymd(datead6))) %>%
-    mutate(datelp6 = as.integer(ymd(datelp6))) %>%
     mutate(large_avg = factor(large_avg), pur3yr = factor(pur3yr)) %>%
     mutate(lpurseason = factor(lpurseason), slscmp = factor(slscmp))
 ```
@@ -529,7 +525,7 @@ linear2 <- lm(targdol ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
                   lifetime + recency + lpurseason +
                   
                   recency:active + 
-                  I(log(ord2ago + K)):I(log(ord3ago + K)) +
+                  I(log(ordlyr + K)):I(log(ord2ago + K)):I(log(ord3ago + K)) +
                 I(log(slslyr + K)):I(log(sls2ago + K)) + 
                 I(log(sls2ago + K)):I(log(sls3ago + K)) +
                 I(log(ord3ago + K)):I(log(ord4bfr + K)) +
