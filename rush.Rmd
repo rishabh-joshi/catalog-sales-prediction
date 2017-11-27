@@ -630,171 +630,53 @@ pred_test <- predict(linear5, newdata = test_linear)
 targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
 ```
 
+### Stepwise regression
 
-## Checking for interaction terms
-
-Creating a matrix of all possible interaction terms
 ```{r}
-all_interact_train <- model.matrix(~(slstyr + slslyr + 
-                                         sls2ago + sls3ago + ordtyr + 
-                                         ordlyr + ord2ago + ord3ago + 
-                                         lpurseason + falord + sprord + recency +
-                                         lifetime + active + avg_amount + 
-                                         large_avg + pur3yr + slscmp + sls4bfr + 
-                                         ord4bfr)^2, data = train_linear)
+linear_model <- linear2
+bwd <- step(linear_model, direction = "both")
+summary(bwd)
 
-log_all_interact_train <- model.matrix(~(I(log(slstyr + K)) + I(log(slslyr + K))+
-                I(log(sls2ago + K)) + I(log(sls3ago + K)) + I(log(sls4bfr + K)) +
-                I(log(ordtyr + K)) + I(log(ordlyr + K)) + I(log(ord2ago + K)) + 
-                I(log(ord3ago + K)) + I(log(sprord+K)) + I(log(falord+K)) + 
-                I(log(avg_amount + K)) + large_avg + active + lifetime + 
-                recency + lpurseason + avg_amount + pur3yr + slscmp)^2,
-                data = train_linear)
-
-all_interact_test <- model.matrix(~(slstyr + slslyr + 
-                                         sls2ago + sls3ago + ordtyr + 
-                                         ordlyr + ord2ago + ord3ago + 
-                                         lpurseason + falord + sprord + recency +
-                                         lifetime + active + avg_amount + 
-                                         large_avg + pur3yr + slscmp + sls4bfr + 
-                                         ord4bfr)^2, data = test_linear)
-
-log_all_interact_test <- model.matrix(~(I(log(slstyr + K)) + I(log(slslyr + K))+
-                I(log(sls2ago + K)) + I(log(sls3ago + K)) + I(log(sls4bfr + K)) +
-                I(log(ordtyr + K)) + I(log(ordlyr + K)) + I(log(ord2ago + K)) + 
-                I(log(ord3ago + K)) + I(log(sprord+K)) + I(log(falord+K)) + 
-                I(log(avg_amount + K)) + large_avg + active + lifetime + 
-                recency + lpurseason + avg_amount + pur3yr + slscmp)^2,
-                data = test_linear)
-
-
-
-# tr <- log(all_interact_pair+1)
-tr <- log_all_interact_pair
-# nsv <- nearZeroVar(tr, saveMetrics = TRUE)
-# tr = tr[,!nsv$nzv]
-tr_cor <- as.matrix(cor(tr))
-tr_cor_melt <- arrange(melt(tr_cor), -abs(value))
-tr_cor_melt <- filter(tr_cor_melt, Var1 != Var2)
-tr_cor_melt <- tr_cor_melt[seq(from=1, to=nrow(tr_cor_melt), by=2),]
-thresh = 0.7 # displaying only correlations above threshold
-filter(tr_cor_melt, abs(value)>thresh)
+pred_test <- predict(bwd, newdata = test_linear)
+# uncomment this line if the response of the model is log
+# pred_test <- exp(pred_test)-K
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
 ```
 
-Removing the variables which are highly correlated with another variable.
-```{r}
-# remove_cols <- filter(tr_cor_melt, abs(value)>thresh) %>% select(Var1) %>% unique()
-# remove_cols$Var1 <- as.character(remove_cols$Var1)
-# tr <- tr[, -which(colnames(tr) %in% remove_cols$Var1)]
-```
+This model esults in a lower payoff and higher MSPE.
 
-#### Fitting a backwards stepwise regression with all the interaction variables.
+### Lasso regression (not completed yet)
 
-Backwards stepwise regression on the log of targdol
-```{r}
-all_fit_log <- lm(log(train_linear$targdol+K) ~ . , data = data.frame(log_all_interact_train))
-fit3 <- step(all_fit_log, direction = "both")
-```
 
-Performing Lasso regression on all possible pairs of interaction terms.
 ```{r}
-lassocv <- cv.glmnet(log_all_interact_train, log(train_linear$targdol+K), alpha=1, nfold=3, lambda=seq(0,10,0.01))
+linear_model <- linear2
+
+train_lasso <- model.matrix(formula(linear_model$call), data = train_linear)
+test_lasso <- model.matrix(formula(linear_model$call), data = test_linear)
+
+lassocv <- cv.glmnet(train_lasso, 
+                     train_linear$targdol, alpha=1, nfold=3,
+                     lambda=seq(0,10,0.01))
+
 lambdalasso=lassocv$lambda.min
 print(lambdalasso)
 plot(lassocv)
 small.lambda.index <- which(lassocv$lambda == lassocv$lambda.min)
 small.lambda.betas <- coef(lassocv$glmnet.fit)[,small.lambda.index]
-print(small.lambda.betas)
+print(small.lambda.betas[small.lambda.betas>0])
 plot(lassocv,xvar="lambda",label=TRUE, main="Coeffs of Lasso Regression", type="l", xlab=expression("log_lambda"), ylab="Coeff")
 abline(h=0); 
 abline(v=log(lassocv$lambda.min))
 summary(lassocv)
-```
-
-Best subsets regression on targdol
-```{r}
-all_fit <- lm(train_linear$targdol ~ . , data = data.frame(all_interact_train))
-fit4 <- step(all_fit, direction = "both")
-```
 
 
-VIFs for the stepwise regression model.
-```{r}
-vifs <- vif(bwd)
-sort(vifs)
-coefs <- names(vifs)
-log_all_interact_pair_df <- data.frame(log_all_interact_pair)
-log_all_interact_pair_df <- log_all_interact_pair_df[, which(names(log_all_interact_pair_df) %in% coefs)]
+# uncomment this line if the response of the model is log
+# pred_test <- exp(pred_test)-K
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
 
-# best_bwd <- lm(train2$targdol ~ ., data = log_all_interact)
-# summary(best_bwd)
-# sort(vif(best_bwd), decreasing = TRUE)
-# 
-# remove <- names(vif(best_bwd)[vif(best_bwd)>1000])
-# log_all_interact <- log_all_interact[, -which(names(log_all_interact) %in% remove)]
-# 
-# best_bwd <- lm(train2$targdol ~ ., data = log_all_interact)
-# summary(best_bwd)
-# sort(vif(best_bwd), decreasing = TRUE)
-```
-
-Best subsets regression on logarithm of targdol
-```{r}
-bestAIClog <- bestglm(data.frame(log_all_interact_pair_df, log(train$targdol+K)), IC="AIC")
-summary(bestAIClog$BestModel)
-```
-
-This model has an adjusted $R^2$ of 0.1517.
-
-
-Best subsets regression on targdol
-```{r}
-bestAIC <- bestglm(data.frame(log_all_interact_pair_df, train$targdol), IC="AIC")
-summary(bestAIC$BestModel)
 ```
 
 
-
-
-
-
-
-
-Fitting a linear model using the significant coefficients of the LASSO REGRESSION
-
-```{r}
-lmfit2 <- lm(I(log(targdol+1)) ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
-                I(log(sls2ago + K)) + I(log(sls3ago + K)) + I(log(slshist + K)) +
-                I(log(ordtyr + K)) + I(log(ordlyr + K)) +
-                I(log(ord2ago + K)) + I(log(ord3ago + K)) + I(log(ordhist + K)) +
-                I(log(sprord+K)) + I(log(falord+K)) +
-                I(log(avg_amount + K)) + large_avg + active + lifetime + recency + lpurseason + 
-                I(log(slstyr + K)):I(log(slslyr + K)) + I(log(slstyr + K)):I(log(ordtyr + K)) + I(log(ordtyr + K)):I(log(ordlyr + K)) + I(log(ordtyr + K)):I(log(ord3ago + K)) + I(log(ordlyr + K)):I(log(ord3ago + K)) + I(log(sprord + K)):I(log(falord + K)) + large_avg:active + large_avg:lifetime,
-                 data = select(train, -id))
-
-summary(lmfit2)
-```
-
-
-Taking the non zero coefficients from lasso regression and performing linear regression on them.
-```{r}
-log_all_interact_df <- data.frame(log_all_interact)
-log_all_interact_df <- log_all_interact_df[, which(gsub("\\.",":",names(log_all_interact_df)) %in% names(small.lambda.betas[small.lambda.betas>0]))]
-all_interact_fit <- lm(I(log(train2$targdol+K)) ~ ., data = log_all_interact_df)
-
-summary(all_interact_fit)
-```
-
-The $R^2$ is 0.052.
-
-Backwards stepwise regression on all possible interaction terms
-```{r}
-all_interact_fit <- lm(train2$targdol ~ . , data = data.frame(log_all_interact))
-bwd <- step(all_interact_fit, direction = "both")
-
-bestAIClog_allinteract <- bestglm(data.frame(log_all_interact, log(train2$targdol)), IC="AIC")
-summary(bestAIClog_allinteract$BestModel)
-```
 
 ### Writing the predicted targdol to a file
 
@@ -815,7 +697,7 @@ prob_test <- read.csv("prob.csv")
 
 ```{r}
 actual_targdol <- select(test_linear, id, targdol)
-linear_model <- linear2
+linear_model <- bwd # change this to any linear model you tried
 prob_targdol <- merge(prob_test, targdol_test, by = "id")
 prob_targdol <- merge(prob_targdol, actual_targdol, by = "id")
 names(prob_targdol) <- c("id", "prob", "pred_targdol", "actual_targdol")
@@ -838,6 +720,14 @@ payoff
 ```
 
 
+## Theoretical maximum payoff
+
+```{r}
+th_max_payoff <- sum(sort(prob_targdol$actual_targdol, 
+                          decreasing = TRUE)[1:1000])
+
+precentage <- 100*payoff/th_max_payoff
+```
 
 
 
