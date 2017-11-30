@@ -41,11 +41,13 @@ Converting both the date variabels to their corresponding integer values, which 
 ```{r}
 train <- train %>%
     mutate(large_avg = factor(large_avg), pur3yr = factor(pur3yr)) %>%
-    mutate(lpurseason = factor(lpurseason), slscmp = factor(slscmp))
+    mutate(lpurseason = factor(lpurseason), slscmp = factor(slscmp)) %>%
+    mutate(id = as.character(id))
 
 test <- test %>%
     mutate(large_avg = factor(large_avg), pur3yr = factor(pur3yr)) %>%
-    mutate(lpurseason = factor(lpurseason), slscmp = factor(slscmp))
+    mutate(lpurseason = factor(lpurseason), slscmp = factor(slscmp)) %>%
+    mutate(id = as.character(id))
 ```
 
 Removing last purchase year from the data because we have already accounted for the last purchase date in the `datelp6` variable. We also need to remove the `responded` variable from this training data because responded will always be 1 in this case since we are only considering `targdol>0`.
@@ -56,10 +58,47 @@ test_logistic <- select(test, -train, -targdol, -lpuryear, -lpurseason_year)
 
 train_linear <- train %>%
     filter(responded==1) %>%
+    select(-datead6, -datelp6) %>%
     select(-train, -lpuryear, -responded, -lpurseason_year, -recency_bin) 
 
 test_linear <- test %>%
+    select(-datead6, -datelp6) %>%
     select(-train, -lpuryear, -responded, -lpurseason_year, -recency_bin)
+```
+
+Creating a centered training and testing data set.
+```{r}
+train_linear_cent <- train_linear %>%
+    mutate(slstyr = log(slstyr+K), slslyr = log(slslyr+K), 
+           sls2ago = log(sls2ago+K), sls3ago = log(sls3ago+K), 
+           sls4bfr = log(sls4bfr+K), slshist = log(slshist+K), 
+           ordtyr = log(ordtyr+K), ordlyr = log(ordlyr+K), 
+           ord2ago = log(ord2ago+K), ord3ago = log(ord3ago+K), 
+           ord4bfr = log(ord4bfr+K), ordhist = log(ordhist+K), 
+           falord = log(falord+K), sprord = log(sprord+K), 
+           avg_amount = log(avg_amount+K))
+
+ind <- sapply(train_linear_cent, is.numeric)
+ind[1] <- FALSE
+temp <- sapply(train_linear_cent[ind], scale, scale = FALSE)
+temp <- data.frame(temp)
+train_linear_cent <- cbind(temp, train_linear_cent[!ind])
+
+test_linear_cent <- test_linear %>%
+    mutate(slstyr = log(slstyr+K), slslyr = log(slslyr+K), 
+           sls2ago = log(sls2ago+K), sls3ago = log(sls3ago+K), 
+           sls4bfr = log(sls4bfr+K), slshist = log(slshist+K), 
+           ordtyr = log(ordtyr+K), ordlyr = log(ordlyr+K), 
+           ord2ago = log(ord2ago+K), ord3ago = log(ord3ago+K), 
+           ord4bfr = log(ord4bfr+K), ordhist = log(ordhist+K), 
+           falord = log(falord+K), sprord = log(sprord+K), 
+           avg_amount = log(avg_amount+K))
+
+ind <- sapply(test_linear_cent, is.numeric)
+ind[1] <- FALSE
+temp <- sapply(test_linear_cent[ind], scale, scale = FALSE)
+temp <- data.frame(temp)
+test_linear_cent <- cbind(temp, test_linear_cent[!ind])
 ```
 
 
@@ -476,11 +515,11 @@ F_meas(factor(as.integer(pred_test>thresh)),
 
 The CCR/accuracies and F1 scores of all the logistic regression models are given below:
 
-- logistic1: CCR = 0.9152, F1 Score = 0.314
-- logistic2: CCR = 0.9242, F1 Score = 0.39
-- logistic3: CCR = 0.9276, F1 Score = 0.4479
-- logistic4: CCR = 0.9283, F1 Score = 0.4613
-- logistic5: CCR = 0.929, F1 Score = 0.4444
+- logistic1: CCR = 0.9152, F1 Score = 0.314 AIC = 25934
+- logistic2: CCR = 0.9242, F1 Score = 0.39 AIC = 24332
+- logistic3: CCR = 0.9276, F1 Score = 0.4479, AIC = 24080 
+- logistic4: CCR = 0.9283, F1 Score = 0.4613, AIC = 23992
+- logistic5: CCR = 0.929, F1 Score = 0.4444, AIC = 23873
 
 
 ### Writing the predicted probabilites to a file
@@ -503,11 +542,12 @@ Fitting a multiple regression model on `targdol` as response but only where `tar
 
 Fitting the linear model with targdol as reponse
 ```{r}
-linear1 <- lm(targdol ~ . -slshist - ordhist - datead6 - datelp6 -ord4bfr, data = select(train_linear, -id))
+linear1 <- lm(targdol ~ . , data = select(train_linear, -id, -slshist, - ordhist, - ord4bfr))
 
 summary(linear1)
 
-pred_test <- predict(linear1, newdata = test_linear)
+pred_test <- predict(linear1, newdata = select(test_linear, -id, -slshist, - ordhist, 
+                                               - ord4bfr))
 
 targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
 ```
@@ -515,7 +555,7 @@ targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
 ### linear2
 
 ```{r}
-linear2 <- lm(targdol ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
+linear2 <- lm(I(log(targdol+K)) ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
                   I(log(sls2ago + K)) + I(log(sls3ago + K)) + 
                   I(log(slshist + K)) + I(log(ordtyr + K)) + 
                   I(log(ordlyr + K)) + I(log(ord2ago + K)) + 
@@ -525,7 +565,7 @@ linear2 <- lm(targdol ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
                   lifetime + recency + lpurseason +
                   
                   recency:active + 
-                  I(log(ordlyr + K)):I(log(ord2ago + K)):I(log(ord3ago + K)) +
+                  I(log(ord2ago + K)):I(log(ord3ago + K)) +
                 I(log(slslyr + K)):I(log(sls2ago + K)) + 
                 I(log(sls2ago + K)):I(log(sls3ago + K)) +
                 I(log(ord3ago + K)):I(log(ord4bfr + K)) +
@@ -543,13 +583,13 @@ targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
 ### linear3
 
 ```{r}
-linear3 <- lm(I(log(targdol+K)) ~ I(log(slstyr + K)) + I(log(slslyr + K)) +
-                  I(log(sls2ago + K)) + I(log(sls3ago + K)) + 
-                  I(log(slshist + K)) + I(log(ordtyr + K)) + 
-                  I(log(ordlyr + K)) + I(log(ord2ago + K)) + 
-                  I(log(ord3ago + K)) + I(log(ordhist + K)) +
-                  I(log(sprord+K)) + I(log(falord+K)) + 
-                  I(log(avg_amount + K)) + large_avg + active + 
+linear3 <- lm(log(targdol+K) ~ log(slstyr + K) + log(slslyr + K) +
+                  log(sls2ago + K) + log(sls3ago + K) + 
+                  log(slshist + K) + log(ordtyr + K) + 
+                  log(ordlyr + K) + log(ord2ago + K) + 
+                  log(ord3ago + K) + log(ordhist + K) +
+                  log(sprord+K) + log(falord+K) + 
+                  log(avg_amount + K) + large_avg + active + 
                   lifetime + recency + lpurseason, 
               data = select(train_linear, -id))
 
@@ -630,51 +670,182 @@ pred_test <- predict(linear5, newdata = test_linear)
 targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
 ```
 
+
+### linear6 (from all possible pairs of interactions)
+
+```{r}
+linear6 <- lm(log(train_linear$targdol + K) ~ log(slstyr + K) + 
+                                            log(sls2ago + K) + 
+                                            log(sls3ago + K) +
+                                            log(ordlyr + K) +
+                                            log(ord2ago + K) + 
+                                            log(ord3ago + K) +
+                                            log(falord + K) +
+                                            active +
+                                            lifetime +
+                                            lpurseason + 
+                                            log(avg_amount + K) + 
+                                            pur3yr +
+                                            # log(slstyr + K):log(sls4bfr + K) + 
+                                            log(slstyr + K):log(ordtyr + K) + 
+
+                                            log(slstyr + K):log(avg_amount + K) + 
+                                            log(slstyr + K):slscmp + 
+                                            log(slslyr + K):log(ordlyr + K) + 
+                                            log(slslyr + K):log(avg_amount + K) + 
+                                            log(slslyr + K):lifetime +
+                                            log(sls2ago + K):log(ord2ago + K) + 
+                                            # log(sls2ago + K):large_avg + 
+                                            log(sls2ago + K):recency +
+                                            # log(sls3ago + K):active +
+                                            log(ordtyr + K):log(ordlyr + K) + 
+                                            log(ordtyr + K):log(avg_amount + K) + 
+                                            # log(ordlyr + K):active + 
+                                            log(ordlyr + K):lifetime +
+                                            # log(ord2ago + K):large_avg + 
+                                            log(ord2ago + K):recency +
+                                            # log(ord3ago + K):active + 
+                                            log(avg_amount + K):large_avg + 
+                                            log(avg_amount + K):active + 
+                                            # log(avg_amount + K):avg_amount +
+                                            active:recency + 
+                                            active:pur3yr + 
+                                            lifetime:recency + 
+                                            lifetime:pur3yr + 
+                                            log(avg_amount + K):pur3yr 
+                                            ,data = train_linear)
+
+summary(linear6)
+
+pred_test <- predict(linear6, newdata = test_linear)
+pred_test <- exp(pred_test)-K
+
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+```
+
+
+### linear7 (linear6 refined)
+
+keeping only the coefficients resulting from doing stepwise rergession on linear6
+
+```{r}
+linear7 <- lm(log(train_linear$targdol + K) ~ log(slstyr + K) + 
+                                            log(sls2ago + K) + 
+                                            # log(sls3ago + K) +
+                                            log(ordlyr + K) +
+                                            log(ord2ago + K) + 
+                                            # log(ord3ago + K) +
+                                            log(falord + K) +
+                                            active +
+                                            lifetime +
+                                            lpurseason + 
+                                            log(avg_amount + K) + 
+                                            pur3yr +
+                                            # log(slstyr + K):log(sls4bfr + K) + 
+                                            log(slstyr + K):log(ordtyr + K) + 
+                                            log(slstyr + K):log(avg_amount + K) + 
+                                            log(slstyr + K):slscmp + 
+                                            log(slslyr + K):log(ordlyr + K) + 
+                                            log(slslyr + K):log(avg_amount + K) + 
+                                            # log(slslyr + K):lifetime +
+                                            log(sls2ago + K):log(ord2ago + K) +
+                  # log(slslyr + K):log(sls2ago + K) +
+                                            # log(sls2ago + K):large_avg + 
+                                            # log(sls2ago + K):recency +
+                                            # log(sls3ago + K):active +
+                                            log(ordtyr + K):log(ordlyr + K) + 
+                                            # log(ordtyr + K):log(avg_amount + K) + 
+                                            # log(ordlyr + K):active + 
+                                            # log(ordlyr + K):lifetime +
+                                            # log(ord2ago + K):large_avg + 
+                                            # log(ord2ago + K):recency +
+                                            # log(ord3ago + K):active + 
+                                            log(avg_amount + K):large_avg + 
+                                            log(avg_amount + K):active + 
+                                            # log(avg_amount + K):avg_amount +
+                                            active:recency + 
+                                            # active:pur3yr + 
+                                            lifetime:recency + 
+                                            # lifetime:pur3yr + 
+                                            log(avg_amount + K):pur3yr 
+                                            ,data = train_linear)
+
+summary(linear7)
+
+pred_test <- predict(linear7, newdata = test_linear)
+pred_test <- exp(pred_test)-K
+
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+```
+
+### linear8 (linear7 but with centered predictors to remove multicollinearity)
+
+Applied stepwise on linear7, kept only those predictors that were in the step model, then centered the predictors to remove multicollinearity.
+```{r}
+linear8 <- lm(log(train_linear$targdol + K) ~ I(log(slstyr + K) - mean(log(slstyr + K))) + 
+            I(log(sls2ago + K) - mean(log(sls2ago + K))) +
+            # log(sls3ago + K) +
+            I(log(ordlyr + K) - mean(log(ordlyr + K))) +
+            I(log(ord2ago + K) - mean(log(ord2ago + K))) +
+            # log(ord3ago + K) +
+            I(log(falord + K) - mean(log(falord + K))) +
+            active +
+            # lifetime +
+            lpurseason + 
+            I(log(avg_amount + K) - mean(log(avg_amount + K))) + 
+            pur3yr +
+            # log(slstyr + K):log(sls4bfr + K) + 
+            I(log(slstyr + K) - mean(log(slstyr + K))):I(log(ordtyr + K) - mean(log(ordtyr + K))) + 
+            I(log(slstyr + K) - mean(log(slstyr + K))):I(log(avg_amount + K) - mean(log(avg_amount + K))) + 
+            I(log(slstyr + K) - mean(log(slstyr + K))):slscmp + 
+            I(log(slslyr + K) - mean(log(slslyr + K))):I(log(ordlyr + K) - mean(log(ordlyr + K))) + 
+            I(log(slslyr + K) - mean(log(slslyr + K))):I(log(avg_amount + K) - mean(log(avg_amount + K))) + 
+            # log(slslyr + K):lifetime +
+            I(log(sls2ago + K) - mean(log(sls2ago + K))):I(log(ord2ago + K) - mean(log(ord2ago + K))) +
+# I(log(slslyr + K) - mean(log(slslyr + K))):I(log(sls2ago + K) - mean(log(sls2ago + K))) +
+            # I(log(sls2ago + K) - mean(log(sls2ago + K))):large_avg + 
+            # I(log(sls2ago + K) - mean(log(sls2ago + K))):recency +
+            # I(log(sls3ago + K) - mean(log(sls3ago + K))):active +
+            I(log(ordtyr + K) - mean(log(ordtyr + K))):I(log(ordlyr + K) - mean(log(ordlyr + K))) + 
+            # log(ordtyr + K):log(avg_amount + K) + 
+            # log(ordlyr + K):active + 
+            # log(ordlyr + K):lifetime +
+            # log(ord2ago + K):large_avg + 
+            # log(ord2ago + K):recency +
+            # log(ord3ago + K):active + 
+            I(log(avg_amount + K) - mean(log(avg_amount + K))):large_avg + 
+            I(log(avg_amount + K) - mean(log(avg_amount + K))):active + 
+            # log(avg_amount + K):avg_amount +
+            active:recency + 
+            # active:pur3yr + 
+            # lifetime:recency + 
+            # lifetime:pur3yr + 
+            I(log(avg_amount + K) - mean(log(avg_amount + K))):pur3yr 
+                                            ,data = train_linear)
+
+summary(linear8)
+
+pred_test <- predict(linear8, newdata = test_linear)
+pred_test <- exp(pred_test)-K
+
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+
+```
+
+
 ### Stepwise regression
 
 ```{r}
-linear_model <- linear2
+linear_model <- linear8
 bwd <- step(linear_model, direction = "both")
 summary(bwd)
 
 pred_test <- predict(bwd, newdata = test_linear)
-# uncomment this line if the response of the model is log
-# pred_test <- exp(pred_test)-K
-targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+# uncomment this line if the response of the model is log (for linear3 and linear4)
+pred_test <- exp(pred_test)-K
+targdol_test <- data.frame(id = test_linear_cent$id, targdol = pred_test)
 ```
 
-This model esults in a lower payoff and higher MSPE.
-
-### Lasso regression (not completed yet)
-
-
-```{r}
-linear_model <- linear2
-
-train_lasso <- model.matrix(formula(linear_model$call), data = train_linear)
-test_lasso <- model.matrix(formula(linear_model$call), data = test_linear)
-
-lassocv <- cv.glmnet(train_lasso, 
-                     train_linear$targdol, alpha=1, nfold=3,
-                     lambda=seq(0,10,0.01))
-
-lambdalasso=lassocv$lambda.min
-print(lambdalasso)
-plot(lassocv)
-small.lambda.index <- which(lassocv$lambda == lassocv$lambda.min)
-small.lambda.betas <- coef(lassocv$glmnet.fit)[,small.lambda.index]
-print(small.lambda.betas[small.lambda.betas>0])
-plot(lassocv,xvar="lambda",label=TRUE, main="Coeffs of Lasso Regression", type="l", xlab=expression("log_lambda"), ylab="Coeff")
-abline(h=0); 
-abline(v=log(lassocv$lambda.min))
-summary(lassocv)
-
-
-# uncomment this line if the response of the model is log
-# pred_test <- exp(pred_test)-K
-targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
-
-```
 
 
 
@@ -693,11 +864,12 @@ targdol_test <- read.csv("targdol.csv")
 prob_test <- read.csv("prob.csv")
 ```
 
-### Statistical Criterion
+### Statistical Criterion (MSPE)
 
+Calculating the MSPE using both logistic and linear models and the final prediction of tagdol.
 ```{r}
 actual_targdol <- select(test_linear, id, targdol)
-linear_model <- bwd # change this to any linear model you tried
+linear_model <- linear7 # change this to any linear model you tried
 prob_targdol <- merge(prob_test, targdol_test, by = "id")
 prob_targdol <- merge(prob_targdol, actual_targdol, by = "id")
 names(prob_targdol) <- c("id", "prob", "pred_targdol", "actual_targdol")
@@ -705,12 +877,46 @@ prob_targdol <- mutate(prob_targdol, expected_targdol = prob*pred_targdol)
 head(prob_targdol)
 p <- length(linear_model$coefficients) - 1
 n <- nrow(prob_targdol)
-MSPE <- sum((prob_targdol$actual_targdol - 
-                 prob_targdol$expected_targdol)^2)/(n-(p+1))
+# MSPE <- sum((prob_targdol$actual_targdol -
+#                  prob_targdol$expected_targdol)^2)/(n-(p+1))
+# MSPE
+```
+
+Adj r sq
+```{r}
+summary(linear_model)$adj.r.squared
+```
+
+
+For non-centered data
+```{r}
+linear_model <- linear7
+pred_test <- predict(linear_model, newdata = filter(test_linear, targdol>0))
+pred_test <- exp(pred_test) - K
+original <- filter(test_linear, targdol>0)$targdol
+n <- length(pred_test)
+p <- length(coef(linear_model))
+MSPE <- sum((pred_test - original)^2)/(n-p-1)
 MSPE
 ```
 
-### Financial Criterion
+
+FOR Centered Data
+
+Calculating the MSPE on the subset of test data where the targdol>0 and only using the prediction from the linear model.
+```{r}
+linear_model <- bwd
+pred_test <- predict(linear_model, newdata = filter(test_linear_cent, targdol>0))
+pred_test <- exp(pred_test) - K
+original <- filter(test_linear_cent, targdol>0)$targdol
+n <- length(pred_test)
+p <- length(coef(linear_model))
+MSPE <- sum((pred_test - original)^2)/(n-p-1)
+MSPE
+```
+
+
+### Financial Criterion (Payoff)
 
 Sort in descending order of the expected targdol and grab the corresponding top 1000 actual targdol values.
 ```{r}
@@ -723,20 +929,93 @@ payoff
 ## Theoretical maximum payoff
 
 ```{r}
-th_max_payoff <- sum(sort(prob_targdol$actual_targdol, 
-                          decreasing = TRUE)[1:1000])
-
+th_max_payoff <- sum(sort(test$targdol, decreasing = TRUE)[1:1000])
 precentage <- 100*payoff/th_max_payoff
 ```
 
+adj r sq = 0.1543
+MSPE = 2755.433
+Payoff = 52,429.4
+
+## Findings
+
+#### linear1
+
+- a lot of insignificant predictors.
+- adj r sq = 0.09153
+- payoff = 52715.35
+- mspe = 2495.93
+
+Performing stepwise regression results in 
+
+- a model with all the predictors significant
+- adj r sq = 0.09183
+- payoff = 53111.85
+- mspe = 2495.983
 
 
+#### linear2
+
+- a lot of insignificant predictors.
+- adj r sq = 0.06978
+- payoff = 54585.74
+- mspe = 2544.327
+
+Performing stepwise regression results in 
+
+- a model with all the predictors significant
+- adj r sq = 0.07074
+- payoff = 53806.49
+- mspe = 2536.906
+
+#### linear3 
+
+- most predictors are already significant
+- adj r sq = 0.1094
+- payoff = 54008.29
+- mspe = 2729.643
 
 
+Performing stepwise regression results in
+
+- adj r sq = 0.1095
+- payoff = 53972.44
+- mspe = 2729.299
 
 
+#### linear4
+
+- all the interaction terms added between sales are insignificant
+- adj r sq = 0.1126
+- payoff = 52958.24
+- mspe = 2735.724
 
 
+Performing stepwise regression results in
+
+- all terms are significant but the interactions terms are removed
+- adj r sq = 0.1132
+- payoff = 53111.04
+- mspe = 2734.543
+
+#### linear5
+
+- all the interaction terms added between sales are insignificant
+- adj r sq = 0.07429
+- payoff = 53546.74
+- mspe = 2560.358
 
 
+Performing stepwise regression results in
 
+- all terms are significant
+- adj r sq = 0.07539
+- payoff = 53546.74
+- mspe = 2553.414
+
+
+#### linear2 with log response
+
+- adj r sq = 0.1097
+- payoff = 53734.59
+- mspe = 2735.528
