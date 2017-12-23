@@ -1,0 +1,202 @@
+---
+title: "Data Cleaning"
+author: "Jill, Lauren, Rush, Will"
+output:
+  html_document:
+    keep_md: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(comment = "")
+knitr::opts_chunk$set(fig.align = 'center')
+knitr::opts_chunk$set(cache = TRUE)
+```
+
+This file contains the code to clean the raw data in the file `catalog sales data.csv` and generate two data files called `clean_train.csv` and `clean_test.csv` containing the preprocessed training and testing data sets respectively.
+
+## Loading required libraries and reading the data
+
+```{r, message=FALSE, warning=FALSE}
+library(dplyr)
+library(lubridate)
+sales <- read.csv("catalog sales data.csv", stringsAsFactors = FALSE)
+```
+
+
+## Data cleaning
+
+#### ID column
+
+Adding an ID column to identify each customer uniquely
+
+```{r}
+sales <- mutate(sales, id = as.integer(row.names(sales)))
+```
+
+#### Date variables
+
+Converting the date variables into correct format
+
+```{r}
+sales <- mutate(sales, datead6 = mdy(datead6), datelp6 = mdy(datelp6))
+```
+
+
+### Removing inconsistencies in the data
+
+As described in the problem statement, "If you run a histogram or frequency distribution of the datelp6 variable among only those with targdol > 0 you will see that, for the most part, datelp6 equals one of two distinct dates in the calendar year. It is as if the person who prepared the data did some strange rounding within six-month bins."
+
+We handled this situation by creating a new variable as follows.
+
+#### lpurseason
+
+A variable `lpurseason` which is 'fall' if the last day of purchase is after June and 'spring' otherwise.
+
+```{r}
+sales <- sales %>%
+    mutate(lpurseason = ifelse(month(sales$datelp6)>6, 'fall', 'spring')) %>%
+    mutate(lpurseason = factor(lpurseason))
+```
+
+
+Again, as described in the problem statement, "there are also other inconsistencies in the data, e.g., `falord + sprord` is not equal to `ordhist` in about 9% of the cases Similarly, the year of latest purchase obtained from `lpuryear` variable and from `datelp6` variable do not always agree. Some of these errors result because when two variables measure the same thing, both are not updated". We will remove these inconsistencies here.
+
+#### datelp6 and lpuryear
+
+Updating NA values of `lpuryear` with the year parsed from `datelp6`. For the non NA values, first convert `datelp6` back to normal 4-digit years for our convenience and compare it with `datelp6_year`, and update one of them with the larger one.
+
+```{r}
+sales$datelp6_year <- year(sales$datelp6)
+sales[!is.na(sales$lpuryear),]$lpuryear <- ifelse(sales[!is.na(sales$lpuryear),]$lpuryear<3,as.integer(paste0('201',as.character(sales[!is.na(sales$lpuryear),]$lpuryear))),as.integer(paste0('200',as.character(sales[!is.na(sales$lpuryear),]$lpuryear))))
+sales[is.na(sales$lpuryear),]$lpuryear <- sales[is.na(sales$lpuryear),]$datelp6_year
+sales[sales$lpuryear < sales$datelp6,]$lpuryear <- sales[sales$lpuryear < sales$datelp6,]$datelp6_year
+sales <- select(sales, -datelp6_year)
+```
+
+#### falord, sprord and ordhist
+
+If the sum of `falord` and `sprord` are greater than `ordhist`, update `ordhist`. Otherwise, update either `falord` or `sprord` with respect to `lpurseason`,
+```{r}
+sales <- sales %>%
+    mutate(ordhist = ifelse(ordhist<falord+sprord, falord+sprord, ordhist)) %>%
+    mutate(sprord = ifelse(ordhist>falord+sprord & lpurseason == 'spring',
+                           ordhist-falord, sprord)) %>%
+    mutate(falord = ifelse(ordhist>falord+sprord & lpurseason == 'fall',
+                           ordhist-sprord, falord))
+```
+
+
+### Creating new variables
+
+#### Responded
+
+A variable `responded` which indicates whether the customer responded or not. `responded` = 1 if and only if `targdol` > 0 else it is 0.
+
+```{r}
+sales <- sales %>%
+    mutate(responded = as.integer(targdol>0)) %>%
+    mutate(responded = factor(responded))
+```
+
+#### recency bin
+
+Adding recency with bin sizes of 6 months.
+```{r}
+sales$recency_bin <- 2*(2012 - sales$lpuryear)
+sales[sales$lpurseason == "spring",]$recency_bin <- 2*(2012 - sales[sales$lpurseason == "spring",]$lpuryear) + 1
+```
+
+#### lifetime and recency
+
+Adding customer lifetime and recency by calculating days from date
+```{r}
+sales <- sales %>%
+    mutate(recency = as.integer(today() - datelp6)) %>%
+    mutate(lifetime = as.integer(today() - datead6))
+```
+
+#### active
+
+Adding active percentage based on lifetime and recency. This variable is the proportion of the lifetime of a customer for which he was actively making purchases.
+
+```{r}
+sales <- mutate(sales, active = (lifetime - recency)/lifetime)
+```
+
+#### avg_amount
+
+Calculating average spend per order. If both slshist and ordhist are 0, NAs will be produced. We will replace those NAs by 0.
+
+```{r}
+sales <- mutate(sales, avg_amount = slshist/ordhist) %>%
+    mutate(avg_amount = ifelse(is.na(avg_amount), 0, avg_amount))
+```
+
+#### large_avg
+
+Creating a boolean to indicate whether the average amount spent by a customer is greater than the mean average amount spent by all customers.
+
+```{r}
+sales <- mutate(sales, large_avg = ifelse(avg_amount>mean(avg_amount), 1, 0))
+```
+
+#### lpurseason_year
+
+Adding variable for season year
+```{r}
+sales$lpurseason_year <- paste(sales$lpurseason, sales$lpuryear, sep=" ")
+```
+
+#### pur3yr
+
+A boolean variable to indicate whether the customer made a purchase within the last three years.
+
+```{r}
+sales <- mutate(sales, pur3yr = as.integer(year(datelp6)>=2010))
+```
+
+#### slscmp
+
+A boolean variable to indicate whether the customer spend more this year as compared to last year.
+```{r}
+sales <- mutate(sales, slscmp = as.integer(slstyr>slslyr))
+```
+
+#### sls4bfr and ord4bfr
+
+We think there might some correlation between the sum of the sales in the last few years with the total number of sales to date, i.e. `slstyr + slslyr + sls2ago + sls3ago` might be correlated with `slshist`.
+
+```{r}
+with(sales, cor(slstyr + slslyr + sls2ago + sls3ago, slshist))
+with(sales, cor(ordtyr + ordlyr + ord2ago + ord3ago, ordhist))
+```
+
+These correlations become significantly higher if we only consider the data where the customer responded
+
+```{r}
+with(filter(sales, responded == 1), cor(slstyr + slslyr + sls2ago + sls3ago, slshist))
+with(filter(sales, responded == 1), cor(ordtyr + ordlyr + ord2ago + ord3ago, ordhist))
+```
+
+We can simply remove the `ordhist` and `slshist` variables. But we would be loosing some information if we do that. To remove multicollinearity and retain information, we add two more variables called `sls4bfr` and `ord4bfr` which are the total sales dollars and number of orders before 4 years. These can be obtained by subtracting the sum `slstyr + slslyr + sls2ago + sls3ago` from `slshist` and similarly for number of orders. Now we can remove the `ordhist` and `slshist` variables at the time of model building.
+
+```{r}
+sales <- sales %>%
+    mutate(sls4bfr = slshist - slstyr - slslyr - sls2ago - sls3ago) %>%
+    mutate(ord4bfr = ordhist - ordtyr - ordlyr - ord2ago - ord3ago)
+```
+
+
+## Dividing the data into training and test set
+```{r}
+train <- filter(sales, train == 1)
+test <- filter(sales, train == 0)
+```
+
+## Writing out clean data
+
+```{r}
+write.csv(train, file = "clean_train.csv", row.names=FALSE)
+write.csv(test, file = "clean_test.csv", row.names=FALSE)
+```
