@@ -1,0 +1,470 @@
+---
+title: "Linear Regression Models"
+author: "Rush"
+output:
+  html_document:
+    keep_md: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(comment = "")
+knitr::opts_chunk$set(fig.align = 'center')
+# knitr::opts_chunk$set(cache = TRUE)
+```
+
+In this file, we try multiple linear regression models and compare them based on the values of $R^2$, number of variables, diagnostic plots, VIFs, etc. Finally, we combine the logistic and linear models together to compute the payoff and MSPE.
+
+## Data Preprocessing
+
+Loading required libraries
+```{r, warning=FALSE, message=FALSE}
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(tidyr)
+library(reshape2)
+library(car)
+library(bestglm)
+library(caret)
+library(glmnet)
+library(pROC)
+library(SDMTools)
+```
+
+Reading the data
+```{r}
+train <- read.csv("clean_train.csv", stringsAsFactors = FALSE)
+test <- read.csv("clean_test.csv", stringsAsFactors = FALSE)
+```
+
+
+Converting both the date variabels to their corresponding integer values, which specifies the number of days since the date 1970-01-01. This is done to make the date continuous variable. Some other variables are converted to factors.
+
+```{r}
+train <- train %>%
+    mutate(large_avg = factor(large_avg), pur3yr = factor(pur3yr)) %>%
+    mutate(lpurseason = factor(lpurseason), slscmp = factor(slscmp)) %>%
+    mutate(id = as.character(id))
+
+test <- test %>%
+    mutate(large_avg = factor(large_avg), pur3yr = factor(pur3yr)) %>%
+    mutate(lpurseason = factor(lpurseason), slscmp = factor(slscmp)) %>%
+    mutate(id = as.character(id))
+```
+
+Removing last purchase year from the data because we have already accounted for the last purchase date in the `datelp6` variable. Now we create a test and a training data set for the logistic regression modeling process.
+
+```{r}
+train_linear <- train %>%
+    filter(responded==1) %>%
+    select(-datead6, -datelp6) %>%
+    select(-train, -lpuryear, -responded, -lpurseason_year, -recency_bin) 
+
+test_linear <- test %>%
+    select(-datead6, -datelp6) %>%
+    select(-train, -lpuryear, -responded, -lpurseason_year, -recency_bin)
+```
+
+
+A small constant to add before taking log of the predictors in the linear models.
+```{r}
+K = 0.0001
+```
+
+
+## Multiple Linear Regression Models
+
+In this section we will fir various linear models. The intuition behind these models is described in the project report. We improve upon the linear models in terms of $R^2$ and adjusted $R^2$ and try to reduce the number of variables in the model using backwards stepwise regression and removing the non significant variables.
+
+Fitting a multiple regression model on `targdol` as response but only where `targdol>0`. 
+
+### linear1
+
+Fitting the linear model with targdol as reponse
+```{r}
+linear1 <- lm(targdol ~ . , data = select(train_linear, -id, -slshist, -ordhist, -ord4bfr))
+summary(linear1)
+
+pred_test <- predict(linear1, newdata = select(test_linear, -id, -slshist, - ordhist, - ord4bfr))
+
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+```
+
+### linear2
+
+We did a backward stepwise regression on all possible pairs of interactions, and then removed the interaction terms that did not make practical business sense. We then again performed backwards stepwise regression. This was the model that we obtained.
+
+```{r}
+linear2 <- lm(train_linear$targdol ~ slstyr + 
+                                            sls2ago + 
+                                            sls3ago +
+                                            ordlyr +
+                                            ord2ago + 
+                                            ord3ago +
+                                            falord +
+                                            active +
+                                            lifetime +
+                                            lpurseason + 
+                                            avg_amount + 
+                                            pur3yr +
+                                            slstyr:ordtyr + 
+                                            slstyr:avg_amount + 
+                                            slstyr:slscmp + 
+                                            slslyr:ordlyr + 
+                                            slslyr:avg_amount + 
+                                            slslyr:lifetime +
+                                            sls2ago:ord2ago + 
+                                            sls2ago:recency +
+                                            ordtyr:ordlyr + 
+                                            ordtyr:avg_amount + 
+                                            ordlyr:lifetime +
+                                            ord2ago:recency +
+                                            avg_amount:large_avg + 
+                                            avg_amount:active + 
+                                            active:recency + 
+                                            active:pur3yr + 
+                                            lifetime:recency + 
+                                            lifetime:pur3yr + 
+                                            avg_amount:pur3yr 
+                                            ,data = train_linear)
+
+summary(linear2)
+
+pred_test <- predict(linear2, newdata = test_linear)
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+```
+
+### linear3
+
+Because we know the predictors are skewed, we performed linear regression on the log transformed data.
+
+```{r}
+linear3 <- lm(train_linear$targdol ~ log(slstyr + K) + 
+                                            log(sls2ago + K) + 
+                                            log(sls3ago + K) +
+                                            log(ordlyr + K) +
+                                            log(ord2ago + K) + 
+                                            log(ord3ago + K) +
+                                            log(falord + K) +
+                                            active +
+                                            lifetime +
+                                            lpurseason + 
+                                            log(avg_amount + K) + 
+                                            pur3yr +
+                                            log(slstyr + K):log(ordtyr + K) + 
+                                            log(slstyr + K):log(avg_amount + K) + 
+                                            log(slstyr + K):slscmp + 
+                                            log(slslyr + K):log(ordlyr + K) + 
+                                            log(slslyr + K):log(avg_amount + K) + 
+                                            log(slslyr + K):lifetime +
+                                            log(sls2ago + K):log(ord2ago + K) + 
+                                            log(sls2ago + K):recency +
+                                            log(ordtyr + K):log(ordlyr + K) + 
+                                            log(ordtyr + K):log(avg_amount + K) + 
+                                            log(ordlyr + K):lifetime +
+                                            log(ord2ago + K):recency +
+                                            log(avg_amount + K):large_avg + 
+                                            log(avg_amount + K):active + 
+                                            active:recency + 
+                                            active:pur3yr + 
+                                            lifetime:recency + 
+                                            lifetime:pur3yr + 
+                                            log(avg_amount + K):pur3yr 
+                                            ,data = train_linear)
+
+summary(linear3)
+
+pred_test <- predict(linear3, newdata = test_linear)
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+```
+
+Look at the diagnostic plots of this model
+
+```{r}
+plot(linear3, which = c(1,2))
+```
+
+We notice that the residuals are linearly increasing with the fitted values and also the qqplot deviates significantly from the $y=x$ line. Therefore we log transform the response in the next linear model.
+
+### linear4
+
+Fitting a linear model with the response log transformed.
+
+```{r}
+linear4 <- lm(log(train_linear$targdol + K) ~ log(slstyr + K) + 
+                                            log(sls2ago + K) + 
+                                            log(sls3ago + K) +
+                                            log(ordlyr + K) +
+                                            log(ord2ago + K) + 
+                                            log(ord3ago + K) +
+                                            log(falord + K) +
+                                            active +
+                                            lifetime +
+                                            lpurseason + 
+                                            log(avg_amount + K) + 
+                                            pur3yr +
+                                            log(slstyr + K):log(ordtyr + K) + 
+                                            log(slstyr + K):log(avg_amount + K) + 
+                                            log(slstyr + K):slscmp + 
+                                            log(slslyr + K):log(ordlyr + K) + 
+                                            log(slslyr + K):log(avg_amount + K) + 
+                                            log(slslyr + K):lifetime +
+                                            log(sls2ago + K):log(ord2ago + K) + 
+                                            log(sls2ago + K):recency +
+                                            log(ordtyr + K):log(ordlyr + K) + 
+                                            log(ordtyr + K):log(avg_amount + K) + 
+                                            log(ordlyr + K):lifetime +
+                                            log(ord2ago + K):recency +
+                                            log(avg_amount + K):large_avg + 
+                                            log(avg_amount + K):active + 
+                                            active:recency + 
+                                            active:pur3yr + 
+                                            lifetime:recency + 
+                                            lifetime:pur3yr + 
+                                            log(avg_amount + K):pur3yr 
+                                            ,data = train_linear)
+
+summary(linear4)
+
+pred_test <- predict(linear4, newdata = test_linear)
+pred_test <- exp(pred_test)-K
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+```
+
+We have also improved on the $R^2$ significantly on this model.
+
+Checking the diagnostic plots of this model
+
+```{r}
+plot(linear4, which = c(1,2))
+```
+
+We notice that residuals vs fitted values plot and the qqplot are much closer to the ideal case now.
+
+### linear5
+
+We further remove the non-significant predictors from this model and perform backwards stepwise regression to reduce the number of variables. This is the model that we get,
+
+```{r}
+linear5 <- lm(log(train_linear$targdol + K) ~ log(slstyr + K) + 
+                                            log(sls2ago + K) + 
+                                            log(ordlyr + K) +
+                                            log(ord2ago + K) + 
+                                            log(falord + K) +
+                                            active +
+                                            lifetime +
+                                            lpurseason + 
+                                            log(avg_amount + K) + 
+                                            pur3yr + 
+                                            log(slstyr + K):log(ordtyr + K) + 
+                                            log(slstyr + K):log(avg_amount + K) + 
+                                            log(slstyr + K):slscmp + 
+                                            log(slslyr + K):log(ordlyr + K) + 
+                                            log(slslyr + K):log(avg_amount + K) +
+                                            log(sls2ago + K):log(ord2ago + K) +
+                                            log(ordtyr + K):log(ordlyr + K) + 
+                                            log(avg_amount + K):large_avg + 
+                                            log(avg_amount + K):active + 
+                                            active:recency + 
+                                            lifetime:recency + 
+                                            log(avg_amount + K):pur3yr 
+                                            ,data = train_linear)
+
+summary(linear5)
+
+pred_test <- predict(linear5, newdata = test_linear)
+pred_test <- exp(pred_test)-K
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+```
+
+
+Looking at the variance inflation factors of this model
+```{r}
+vif(linear5)
+```
+
+We find that many variables have large VIFs. This is because we have introduced many interaction terms which will be correlated with each of their constituent terms. This type of colinearity is called structural multicolinearity and can be removed by centering the predictors. This is exactly what we do in the next linear model.
+
+### linear6
+
+```{r}
+linear6 <- lm(log(train_linear$targdol + K) ~ scale(log(slstyr + K)) + 
+                                            scale(log(sls2ago + K)) + 
+                                            scale(log(ordlyr + K)) +
+                                            scale(log(ord2ago + K)) + 
+                                            scale(log(falord + K)) +
+                                            active +
+                                            lifetime +
+                                            lpurseason + 
+                                            scale(log(avg_amount + K)) + 
+                                            pur3yr + 
+                                            scale(log(slstyr + K)):scale(log(ordtyr + K)) + 
+                                            scale(log(slstyr + K)):scale(log(avg_amount + K)) + 
+                                            scale(log(slstyr + K)):slscmp + 
+                                            scale(log(slslyr + K)):scale(log(ordlyr + K)) + 
+                                            scale(log(slslyr + K)):scale(log(avg_amount + K)) + 
+                                            scale(log(sls2ago + K)):scale(log(ord2ago + K)) +
+                                            scale(log(ordtyr + K)):scale(log(ordlyr + K)) + 
+                                            scale(log(avg_amount + K)):large_avg + 
+                                            scale(log(avg_amount + K)):active + 
+                                            active:recency + 
+                                            lifetime:recency + 
+                                            scale(log(avg_amount + K)):pur3yr 
+                                            ,data = train_linear)
+
+summary(linear6)
+
+
+pred_test <- predict(linear6, newdata = test_linear)
+pred_test <- exp(pred_test)-K
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+```
+
+### Influential observations and outliers
+
+Cook's distance plot for this model to find influential observations.
+```{r}
+plot(linear6, which = 4)
+```
+
+Since we did not want to weaken our model by removing all influential observations, we only removed three customers with the highest Cook's distance: 433, 2602, and 4672.
+
+
+We also find the outliers based on standard residuals using the `rstandard()` function. We consider an observation an outlier if its standardized residual is more than three standard deviations away from the mean. We find that there are 27 such observations
+
+```{r}
+outliers <- which(abs(rstandard(linear6))>qnorm(0.997))
+length(outliers)
+```
+
+But we see that 21 of these outliers lie in the top 5% of `targdol`. This indicated that they were high value customers we wanted our model to predict and removing them would hurt the performance of our model. Instead, we removed four outliers that had low targdol since we considered them low value customers. Instead, we removed four outliers that had low targdol since we considered them low value customers.
+
+```{r}
+q <- quantile(train_linear$targdol, seq(0,1,0.05))
+sum(train_linear[outliers,]$targdol>=q['95%'])
+```
+
+### linear7
+
+Removing the influential observations and outliers as discussed above.
+
+```{r}
+linear7 <- lm(log(train_linear[-c(1289, 1312, 4202, 4640, 433, 2602, 4672), ]$targdol + K) ~ log(slstyr + K) + 
+                                            scale(log(sls2ago + K)) + 
+                                            scale(log(ordlyr + K)) +
+                                            scale(log(ord2ago + K)) + 
+                                            active +
+                                            lpurseason + 
+                                            scale(log(avg_amount + K)) + 
+                                            pur3yr +
+                                            scale(log(slstyr + K)):scale(log(ordtyr + K)) + 
+                                            scale(log(slstyr + K)):scale(log(avg_amount + K)) + 
+                                            scale(log(slstyr + K)):slscmp + 
+                                            scale(log(slslyr + K)):scale(log(ordlyr + K)) + 
+                                            scale(log(slslyr + K)):scale(log(avg_amount + K)) + 
+                                            scale(log(sls2ago + K)):scale(log(ord2ago + K)) +
+                                            scale(log(ordtyr + K)):scale(log(ordlyr + K)) +
+                                            scale(log(avg_amount + K)):large_avg + 
+                                            scale(log(avg_amount + K)):active + 
+                                            active:recency + 
+                                            scale(log(avg_amount + K)):pur3yr 
+                                            ,data = train_linear[-c(1289, 1312, 4202, 4640, 433, 2602, 4672), ])
+
+summary(linear7)
+
+pred_test <- predict(linear7, newdata = test_linear)
+pred_test <- exp(pred_test)-K
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+```
+
+
+### Stepwise regression
+
+This code is used to perform stepwise regression on the above models repeatedly to get the most parsimonious model. This peice of code was used after each of the above model was fitted to remove non sgnificant variables.
+
+```{r}
+linear_model <- linear7
+bwd <- step(linear_model, direction = "both")
+summary(bwd)
+
+pred_test <- predict(bwd, newdata = test_linear)
+pred_test <- exp(pred_test)-K
+targdol_test <- data.frame(id = test_linear$id, targdol = pred_test)
+```
+
+
+### Writing the predicted targdol to a file
+
+```{r}
+write.csv(targdol_test, "targdol.csv", row.names=FALSE)
+```
+
+
+## Evalutaing the fitted models
+
+Here we will evaluate the different combinations of the logistic and linear regression models that we have tried so far and see which of these models gets the lowest mean squared prediction error (statistical criterion) and the highest payoff (financial criterion).
+
+```{r}
+targdol_test <- read.csv("targdol.csv")
+prob_test <- read.csv("probabilities.csv")
+```
+
+### Statistical Criterion (MSPE)
+
+Calculating the MSPE using both logistic and linear models and the final prediction of tagdol.
+```{r}
+actual_targdol <- select(test_linear, id, targdol)
+linear_model <- linear7 # change this to any of the above linear models
+prob_targdol <- merge(prob_test, targdol_test, by = "id")
+prob_targdol <- merge(prob_targdol, actual_targdol, by = "id")
+names(prob_targdol) <- c("id", "prob", "pred_targdol", "actual_targdol")
+prob_targdol <- mutate(prob_targdol, expected_targdol = prob*pred_targdol)
+head(prob_targdol)
+p <- length(linear_model$coefficients) - 1
+n <- nrow(prob_targdol)
+```
+
+### Adjusted $R^2$
+
+The adjusted $R^2$ of the final model
+```{r}
+summary(linear_model)$adj.r.squared
+```
+
+### MSPE
+
+Computing the mean squared prediction error (MSPE) for the final model
+```{r}
+pred_test <- predict(linear_model, newdata = filter(test_linear, targdol>0))
+# pred_test <- exp(pred_test) - K
+original <- filter(test_linear, targdol>0)$targdol
+n <- length(pred_test)
+p <- length(coef(linear_model))
+MSPE <- sum((pred_test - original)^2)/(n-p-1)
+MSPE
+```
+
+
+### Financial Criterion (Payoff)
+
+Sort in descending order of the expected targdol and grab the corresponding top 1000 actual targdol values.
+
+```{r}
+prob_targdol_arranged <- arrange(prob_targdol, desc(expected_targdol))
+payoff <- sum(prob_targdol_arranged[1:1000, ]$actual_targdol)
+payoff
+```
+
+
+### Percentage of theoretical maximum payoff
+
+Caclulating the maximu payoff if we were to select the top 1000 customers and the computing the perentage of that maximum payoff that our model is getting.
+
+```{r}
+th_max_payoff <- sum(sort(test$targdol, decreasing = TRUE)[1:1000])
+precentage <- 100*payoff/th_max_payoff
+precentage
+```
